@@ -63,7 +63,7 @@ WS OUT (sequence always contains incrementing out_sequence):
     Action 50 (respond to trade)
         id: trade id when came in
         response: number (0 = accept, 1 = decline, 2 = creating counter offer, 3 = sent counter offer)
-    Action 51 (confirm trade acceptance)
+    Action 51 (finalize trade after enemy agrees)
         see json
     Action 66 (hover/select to place a road or settlement off initial settlement)
         payload: single number, represetnting the edge or vertex (ex: 71) or null if canceling
