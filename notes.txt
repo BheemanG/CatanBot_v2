@@ -4,6 +4,7 @@ Vertices (settlements/cities) - 54
 Edges (roads) - 72
 Tiles - 19
 
+bank is player0
 blue is player1
 red is player2
 
@@ -28,6 +29,8 @@ WS IN (sequence always contains incrementing in_sequence):
         empty payload
     Type 31: (available vertexes starter settlement can place road)
         payload: list of edges
+    Type 43 (resource exchange, used after purchases/upgrades as well)
+       givingPlayer, givingCards, recievingPLayer (0 for bank) recievingCards 
     Type 78 (idk, appears after initialization) 
         "isActive": true/false
         "hasUsedDisableRequest": true/false
@@ -38,6 +41,8 @@ WS IN (sequence always contains incrementing in_sequence):
 
 
 WS OUT (sequence always contains incrementing out_sequence):
+    Action 0 (Send chat message)
+        payload: message string
     Action 2 (Dice Roll)
         payload: true
     Action 8 (Discard)
@@ -48,11 +53,17 @@ WS OUT (sequence always contains incrementing out_sequence):
         payload: vertex # (ex: 48)
     Action 17 (click on buy city at bottom)
         payload: true
-
-    Action 47 (writing trade?)
-
+    Action 18 (confirm build city)
+        payload: city vertex
+    Action 47 (writing trade or counteroffer)
+        payload: true
+    Action 49 (send trade/counteroffer)
+        see json for details
+        CounterOfferInResponseToTradeId: null if not a counteroffer
     Action 50 (respond to trade)
         id: trade id when came in
         response: number (0 = accept, 1 = decline, 2 = creating counter offer, 3 = sent counter offer)
+    Action 51 (confirm trade acceptance)
+        see json
     Action 66 (hover/select to place a road or settlement off initial settlement)
         payload: single number, represetnting the edge or vertex (ex: 71) or null if canceling

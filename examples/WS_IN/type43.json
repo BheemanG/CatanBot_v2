@@ -1,0 +1,19 @@
+{
+  "id": "130",
+  "data": {
+    "type": 43,
+    "payload": {
+      "givingPlayer": 2,
+      "givingCards": [
+        4,
+        4,
+        5,
+        5,
+        5
+      ],
+      "receivingPlayer": 0,
+      "receivingCards": []
+    },
+    "sequence": 111
+  }
+}

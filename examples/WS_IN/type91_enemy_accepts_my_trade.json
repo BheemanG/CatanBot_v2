@@ -1,0 +1,21 @@
+{
+  "id": "130",
+  "data": {
+    "type": 91,
+    "payload": {
+      "diff": {
+        "tradeState": {
+          "activeOffers": {
+            "6qpQ": {
+              "playerResponses": {
+                "1": 1
+              }
+            }
+          }
+        }
+      },
+      "timeLeftInState": 14084.1
+    },
+    "sequence": 129
+  }
+}

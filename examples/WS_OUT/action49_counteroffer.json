@@ -3,13 +3,14 @@
   "payload": {
     "creator": 2,
     "isBankTrade": false,
-    "counterOfferInResponseToTradeId": null,
+    "counterOfferInResponseToTradeId": "trQj",
     "offeredResources": [
-      5
+      4
     ],
     "wantedResources": [
+      1,
       1
     ]
   },
-  "sequence": 80
+  "sequence": 67
 }
