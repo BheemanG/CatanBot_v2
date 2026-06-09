@@ -1,0 +1,20 @@
+Lumber(1), Brick(2), Wool(3), Grain(4), Ore(5)
+
+Vertices (settlements/cities) - 54
+Edges (roads) - 72
+Tiles - 19
+
+sequence: message count, starting at 1, += 1 every message
+id: game id (consistent all game) ex: "130"
+
+
+
+WS IN:
+type: 30 - lists available vertices to place first settlement? 
+type: 78 - unsure
+
+WS OUT:
+Action 8 (Discard):
+    action: 8,
+    payload: card #s for discarded (1, 1, 1) = 3 lumber
+    sequence: [sequence]
