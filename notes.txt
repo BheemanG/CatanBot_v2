@@ -24,7 +24,7 @@ WS IN (sequence always contains incrementing in_sequence):
         DistributionType - placement is 0, dice roll is 1
         can show enemy resource tiles surrounding settlement or be blank
         also shows which
-    Type 30 (means a setlement vertex has been confirmed?)
+    Type 30 (can be empty, or indicate available vertices for city upgrade)
         empty payload
     Type 31: (available vertexes starter settlement can place road)
         payload: list of edges
@@ -33,13 +33,8 @@ WS IN (sequence always contains incrementing in_sequence):
         "hasUsedDisableRequest": true/false
     Type 91 (map state after each update)
         lists whos turn it is, and what edges are owned by who
-        resourceCards tells you how many of each resourece in bank if not full
-            "bankState": {
-                "resourceCards": {
-                    "1": 17,
-                    "5": 18
-                }
-            },
+        bankstate - resourceCards tells you how many of each resourece in bank if not full
+        playerNUmber - resourceCards tells lists out the resourc enumber of each card
 
 
 WS OUT (sequence always contains incrementing out_sequence):
@@ -51,5 +46,13 @@ WS OUT (sequence always contains incrementing out_sequence):
         payload: single number, represetnting the edge? (ex: 71)
     Action 15 (Place Initial Settlement)
         payload: vertex # (ex: 48)
+    Action 17 (click on buy city at bottom)
+        payload: true
+
+    Action 47 (writing trade?)
+
+    Action 50 (respond to trade)
+        id: trade id when came in
+        response: number (0 = accept, 1 = decline, 2 = creating counter offer, 3 = sent counter offer)
     Action 66 (hover/select to place a road or settlement off initial settlement)
         payload: single number, represetnting the edge or vertex (ex: 71) or null if canceling

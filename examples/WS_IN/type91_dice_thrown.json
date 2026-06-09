@@ -1,0 +1,80 @@
+{
+  "id": "130",
+  "data": {
+    "type": 91,
+    "payload": {
+      "diff": {
+        "diceState": {
+          "diceThrown": true,
+          "dice2": 4
+        },
+        "bankState": {
+          "resourceCards": {
+            "4": 17
+          }
+        },
+        "currentState": {
+          "turnState": 2,
+          "startTime": 1781043223972,
+          "allocatedTime": 12000
+        },
+        "playerStates": {
+          "1": {
+            "resourceCards": {
+              "cards": [
+                0,
+                0,
+                0,
+                0
+              ]
+            }
+          },
+          "2": {
+            "resourceCards": {
+              "cards": [
+                2,
+                5,
+                4
+              ]
+            }
+          }
+        },
+        "gameLogState": {
+          "16": {
+            "text": {
+              "type": 10,
+              "playerColor": 2,
+              "firstDice": 1,
+              "secondDice": 4
+            },
+            "from": 2
+          },
+          "17": {
+            "text": {
+              "type": 47,
+              "playerColor": 1,
+              "cardsToBroadcast": [
+                4
+              ],
+              "distributionType": 1
+            },
+            "from": 1
+          },
+          "18": {
+            "text": {
+              "type": 47,
+              "playerColor": 2,
+              "cardsToBroadcast": [
+                4
+              ],
+              "distributionType": 1
+            },
+            "from": 2
+          }
+        }
+      },
+      "timeLeftInState": 12000
+    },
+    "sequence": 41
+  }
+}

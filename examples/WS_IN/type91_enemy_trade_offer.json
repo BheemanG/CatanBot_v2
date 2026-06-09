@@ -1,0 +1,62 @@
+{
+  "id": "130",
+  "data": {
+    "type": 91,
+    "payload": {
+      "diff": {
+        "tradeState": {
+          "activeOffers": {
+            "4fz7": {
+              "id": "4fz7",
+              "creator": 1,
+              "offeredResources": [
+                4,
+                5
+              ],
+              "wantedResources": [
+                2
+              ],
+              "playerResponses": {
+                "2": 0
+              },
+              "counterOfferInResponseToTradeId": null,
+              "playersCreatingCounterOffer": {
+                "1": false,
+                "2": false
+              }
+            }
+          },
+          "closedOffers": {
+            "4fz7": {
+              "offeredResources": [
+                4,
+                5
+              ],
+              "wantedResources": [
+                2
+              ]
+            }
+          }
+        },
+        "gameLogState": {
+          "28": {
+            "text": {
+              "type": 118,
+              "playerColor": 1,
+              "wantedCardEnums": [
+                2
+              ],
+              "offeredCardEnums": [
+                4,
+                5
+              ]
+            },
+            "from": 1
+          }
+        }
+      },
+      "timeLeftInState": 11966.078
+    },
+    "sequence": 54
+  }
+}
