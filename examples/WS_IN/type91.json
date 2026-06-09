@@ -1,0 +1,52 @@
+{
+  "id": "130",
+  "data": {
+    "type": 91,
+    "payload": {
+      "diff": {
+        "mapState": {
+          "tileEdgeStates": {
+            "71": {
+              "owner": 2,
+              "type": 1
+            }
+          }
+        },
+        "currentState": {
+          "completedTurns": 1,
+          "actionState": 1,
+          "currentTurnPlayerColor": 1,
+          "startTime": 1781038413807,
+          "allocatedTime": 18000
+        },
+        "gameLogState": {
+          "3": {
+            "text": {
+              "type": 4,
+              "playerColor": 2,
+              "pieceEnum": 0
+            },
+            "from": 2
+          },
+          "4": {
+            "text": {
+              "type": 44
+            }
+          }
+        },
+        "mechanicRoadState": {
+          "2": {
+            "bankRoadAmount": 14
+          }
+        },
+        "mechanicLongestRoadState": {
+          "2": {
+            "longestRoad": 1
+          }
+        }
+      },
+      "timeLeftInState": 18000
+    },
+    "sequence": 18
+  }
+}

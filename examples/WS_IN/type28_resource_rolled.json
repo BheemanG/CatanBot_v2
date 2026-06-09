@@ -1,0 +1,21 @@
+{
+  "id": "130",
+  "data": {
+    "type": 28,
+    "payload": [
+      {
+        "owner": 2,
+        "tileIndex": 12,
+        "distributionType": 1,
+        "card": 4
+      },
+      {
+        "owner": 1,
+        "tileIndex": 12,
+        "distributionType": 1,
+        "card": 4
+      }
+    ],
+    "sequence": 40
+  }
+}

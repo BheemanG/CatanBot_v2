@@ -1,8 +1,11 @@
-Lumber(1), Brick(2), Wool(3), Grain(4), Ore(5)
+Desert(0), Lumber(1), Brick(2), Wool(3), Grain(4), Ore(5)
 
 Vertices (settlements/cities) - 54
 Edges (roads) - 72
 Tiles - 19
+
+blue is player1
+red is player2
 
 in_sequence: message count for WS IN, starting at 1, += 1 every message
 out_sequence: message count for WS OUT, starting at 1, += 1 every message
@@ -12,23 +15,37 @@ id: game id (consistent all game) ex: "130"
 
 WS IN (sequence always contains incrementing in_sequence):
     Type 1 (game settings)
-        payload: dict of settings, see json
-    Type 4 (initialization)
-        see example json
+        lists settings, see json
+    Type 4 (main map initialization and layout)
+        lists tile locations + types, port locations, etc - see json
     Type 6 (sequence: 1)
-        payload: false?
-    Type 28 (idk, appears after type31)
-        payload: [] (empty)
+        idk, boolean payload
+    Type 28 (shows who got a resource, and what type, and distribution type)
+        DistributionType - placement is 0, dice roll is 1
+        can show enemy resource tiles surrounding settlement or be blank
+        also shows which
     Type 30 (means a setlement vertex has been confirmed?)
-        payload: [] (empty)
+        empty payload
     Type 31: (available vertexes starter settlement can place road)
         payload: list of edges
     Type 78 (idk, appears after initialization) 
         "isActive": true/false
         "hasUsedDisableRequest": true/false
+    Type 91 (map state after each update)
+        lists whos turn it is, and what edges are owned by who
+        resourceCards tells you how many of each resourece in bank if not full
+            "bankState": {
+                "resourceCards": {
+                    "1": 17,
+                    "5": 18
+                }
+            },
+
 
 WS OUT (sequence always contains incrementing out_sequence):
-    Action 8 (Discard):
+    Action 2 (Dice Roll)
+        payload: true
+    Action 8 (Discard)
         payload: card #s for discarded (1, 1, 1) = 3 lumber
     Action 11 (Place Road after initial settlement)
         payload: single number, represetnting the edge? (ex: 71)
