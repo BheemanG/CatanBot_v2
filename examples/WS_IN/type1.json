@@ -1,0 +1,14 @@
+{
+  "id": "130",
+  "data": {
+    "type": 1,
+    "payload": {
+      "gameSettingId": "mine4181",
+      "shouldResetGameClient": true,
+      "databaseGameId": "235418751",
+      "serverId": "012323",
+      "isReconnectingSession": false
+    },
+    "sequence": 2
+  }
+}

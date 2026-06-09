@@ -4,20 +4,35 @@ Vertices (settlements/cities) - 54
 Edges (roads) - 72
 Tiles - 19
 
-sequence: message count, starting at 1, += 1 every message
+in_sequence: message count for WS IN, starting at 1, += 1 every message
+out_sequence: message count for WS OUT, starting at 1, += 1 every message
 id: game id (consistent all game) ex: "130"
 
 
 
-WS IN:
-type: 30 - lists available vertices to place first settlement? 
-type: 78 - unsure
+WS IN (sequence always contains incrementing in_sequence):
+    Type 1 (game settings)
+        payload: dict of settings, see json
+    Type 4 (initialization)
+        see example json
+    Type 6 (sequence: 1)
+        payload: false?
+    Type 28 (idk, appears after type31)
+        payload: [] (empty)
+    Type 30 (means a setlement vertex has been confirmed?)
+        payload: [] (empty)
+    Type 31: (available vertexes starter settlement can place road)
+        payload: list of edges
+    Type 78 (idk, appears after initialization) 
+        "isActive": true/false
+        "hasUsedDisableRequest": true/false
 
-WS OUT:
-Action 8 (Discard):
-    action: 8,
-    payload: card #s for discarded (1, 1, 1) = 3 lumber
-    sequence: [sequence]
-Action 66 (place a road off initial settlement)
-    payload: single number, represetnting the edge? (ex: 71) or null if canceling
-    sequence:
+WS OUT (sequence always contains incrementing out_sequence):
+    Action 8 (Discard):
+        payload: card #s for discarded (1, 1, 1) = 3 lumber
+    Action 11 (Place Road after initial settlement)
+        payload: single number, represetnting the edge? (ex: 71)
+    Action 15 (Place Initial Settlement)
+        payload: vertex # (ex: 48)
+    Action 66 (hover/select to place a road or settlement off initial settlement)
+        payload: single number, represetnting the edge or vertex (ex: 71) or null if canceling
