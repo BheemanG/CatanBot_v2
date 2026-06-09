@@ -18,3 +18,6 @@ Action 8 (Discard):
     action: 8,
     payload: card #s for discarded (1, 1, 1) = 3 lumber
     sequence: [sequence]
+Action 66 (place a road off initial settlement)
+    payload: single number, represetnting the edge? (ex: 71) or null if canceling
+    sequence:
