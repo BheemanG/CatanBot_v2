@@ -1,9 +1,9 @@
 RESOURCE_TYPES = {
     0: 'desert',
-    1: 'wood',
+    1: 'lumber',
     2: 'brick',
-    3: 'sheep',
-    4: 'wheat',
+    3: 'wool',
+    4: 'grain',
     5: 'ore',
 }
 
@@ -20,7 +20,7 @@ DICE_VALUE = {
     12: 1,
 }
 
-#handwritten, used to calculate the rest
+#handwritten, used in precompute to calculate graph_data
 EDGE_TO_VERTICES = {
     0:  [0, 1],
     1:  [1, 2],
