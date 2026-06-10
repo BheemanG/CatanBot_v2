@@ -91,6 +91,8 @@ WS OUT (sequence always contains incrementing out_sequence):
         see json
     Action 53 (highlight a dev card at bottom)
         payload: 48 (48 for all of them idk why)
+    Action 54 (Pause Game)
+        payload:true
     Action 64 (win game? end game?)
         payload: true
     Action 66 [USELESS] (hover/select to place a road or settlement off initial settlement) - first placement is sequence = 2

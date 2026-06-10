@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Catan WS Logger
 // @namespace    http://tampermonkey.net/
-// @version      2.5
+// @version      2.6
 // @match        *://*.colonist.io/*
 // @run-at       document-start
 // @require      https://cdnjs.cloudflare.com/ajax/libs/msgpack-lite/0.1.26/msgpack.min.js
@@ -76,8 +76,12 @@
         const msgType = bytes[0];
         if (msgType === 4) return originalSend(data);
 
-        // capture real header from every outgoing message
-        capturedHeader = bytes.slice(0, 9);
+        // capture header from any outgoing message and force game header bytes
+        const header = bytes.slice(0, 9);
+        header[0] = 3;
+        header[1] = 1;
+        header[2] = 6;
+        capturedHeader = header;
         console.log('[WS HEADER CAPTURED]', Array.from(capturedHeader));
 
         try {
@@ -105,7 +109,7 @@
     unsafeWindow._ws = ws;
     unsafeWindow.catanSend = function(action, payload, sequence) {
       if (!capturedHeader) {
-        console.log('[CATAN] No header captured yet — make a manual move first');
+        console.log('[CATAN] No header captured yet — waiting for first outgoing message');
         return;
       }
       const encoded = msgpack.encode({ action, payload, sequence });

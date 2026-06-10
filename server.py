@@ -41,13 +41,13 @@ def handle_incoming():
 
     #placement settlements
     if msg_type == 30:
-        return jsonify({
-            "actions": [
-                {"action": 66, "payload": 28, "sequence": next_out_sequence()},
-                {"action": 66, "payload": None, "sequence": next_out_sequence()},
-                {"action": 15, "payload": 28, "sequence": next_out_sequence()},
-            ]
-})
+#         return jsonify({
+# #             "actions": [
+# #                 {"action": 66, "payload": 28, "sequence": next_out_sequence()},
+# #                 {"action": 66, "payload": , "sequence": next_out_sequence()},
+# #                 {"action": 15, "payload": 28, "sequence": next_out_sequence()},
+# #             ]
+# # })
         action = 15
         payload = 28
         seq_out = next_out_sequence()
