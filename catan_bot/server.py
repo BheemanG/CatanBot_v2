@@ -29,14 +29,21 @@ def add_headers(response):
 def handle_incoming():
     check_origin()
     data = request.json
+
+    msg_id = data.get('id')
+    if msg_id != 130:
+        return no_action()
+    
     msg_type = data.get('data', {}).get('type')
+    msg_payload = data.get('data', {}).get('payload')
+
     print(f'[WS IN] type: {msg_type}')
 
-    action = decide(msg_type, state, data)
+    action = decide(msg_type, msg_payload, state)
     if action is None:
         return no_action()
     print(f'[WS OUT DRAFT] {action}')
-    return jsonify(action)
+    return no_action()
 
 @app.route('/outgoing', methods=['POST'])
 def handle_outgoing():
