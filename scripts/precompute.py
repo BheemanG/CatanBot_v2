@@ -124,7 +124,7 @@ def precompute_distances(max_dist=MAX_DISTANCE):
     all_distances = {}
     for vertex in VERTEX_TO_VERTICES:
         all_distances[vertex] = bfs(vertex, max_dist)
-        print(f'[PRECOMPUTE] vertex {vertex} done — {len(all_distances[vertex])} reachable')
+        print(f'[PRECOMPUTE] vertex {vertex} done')
     return all_distances
 
 # ─── save / load ──────────────────────────────────────────────────────────────
@@ -150,9 +150,6 @@ def load(path):
 
 if __name__ == '__main__':
     print('[PRECOMPUTE] building adjacency lists...')
-    print(f'[PRECOMPUTE] {len(VERTEX_TO_VERTICES)} vertices found')
-    print(f'[PRECOMPUTE] {len(VERTEX_TO_EDGES)} edge mappings found')
-
     print('[PRECOMPUTE] computing distances...')
     distances = precompute_distances()
     save(distances, DISTANCES_PATH)
@@ -168,5 +165,6 @@ if __name__ == '__main__':
     print(f'  distance 0 -> 53: {d[0].get(53, "not reachable")}')
     print(f'  distance 0 -> 1:  {d[0].get(1,  "not reachable")}')
     print(f'  distance 0 -> 0:  {d[0].get(0,  "not reachable")}')
+    print(f'  distance 11 -> 26:  {d[11].get(26,  "not reachable")}')
 
     print('[PRECOMPUTE] done')
