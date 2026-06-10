@@ -8,7 +8,8 @@ class Hex:
 
 class GameState:
     def __init__(self):
-        self.hexes        = [None] * 19
+        self.hexes        = [None] * 19 #contains 19 Hex objects from parse_board
+        self.vertices     = [None] * 54 #contains id of occupying player, 0 if unoccupied
         self.my_color     = None
         self.current_turn = None
         self.out_sequence = 1
@@ -18,6 +19,7 @@ class GameState:
         return self.out_sequence
 
     def parse_board(self, msg_payload):
+        self.my_color = msg_payload.get('playerColor')
         tiles = msg_payload.get('gameState', {}).get('mapState', {}).get('tileHexStates', {})
         for hex_id, hex_data in tiles.items():
             self.hexes[int(hex_id)] = Hex(
@@ -25,4 +27,5 @@ class GameState:
                 resource=hex_data.get('type'),
                 dice=hex_data.get('diceNumber')
             )
+        
         print('[STATE] hexes parsed')

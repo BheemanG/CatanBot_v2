@@ -25,7 +25,13 @@ def score_vertex(v_id, state):
     return sum(score_hex(state.hexes[h_id]) for h_id in VERTEX_TO_HEXES[v_id])
 
 def calculate_placement(state, msg_payload):
-    return max(msg_payload, key=lambda v_id: score_vertex(v_id, state))
+    vertex = max(msg_payload, key=lambda v_id: score_vertex(v_id, state))
+    state.vertices[vertex] = state.my_color
+    return vertex
+
+def calculate_placement_road(state, msg_payload):
+    
+    return max(msg_payload)
 
 
 def decide(msg_type, msg_payload, state):
@@ -35,6 +41,12 @@ def decide(msg_type, msg_payload, state):
         return {
             "action": 15,
             "payload": calculate_placement(state, msg_payload),
+            "sequence": state.next_sequence()
+        }
+    elif msg_type == 31:
+        return {
+            "action": 11,
+            "payload": calculate_placement_road(state, msg_payload),
             "sequence": state.next_sequence()
         }
     return None
