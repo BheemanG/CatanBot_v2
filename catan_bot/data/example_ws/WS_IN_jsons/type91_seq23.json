@@ -1,0 +1,73 @@
+{
+  "id": "130",
+  "data": {
+    "type": 91,
+    "payload": {
+      "diff": {
+        "bankState": {
+          "resourceCards": {
+            "1": 17,
+            "5": 18
+          }
+        },
+        "mapState": {
+          "tileCornerStates": {
+            "18": {
+              "owner": 1,
+              "buildingType": 1
+            }
+          }
+        },
+        "currentState": {
+          "actionState": 3,
+          "startTime": 1781042242316,
+          "allocatedTime": 4500
+        },
+        "playerStates": {
+          "1": {
+            "victoryPointsState": {
+              "0": 2
+            },
+            "resourceCards": {
+              "cards": [
+                0,
+                0,
+                0
+              ]
+            }
+          }
+        },
+        "gameLogState": {
+          "8": {
+            "text": {
+              "type": 4,
+              "playerColor": 1,
+              "pieceEnum": 2
+            },
+            "from": 1
+          },
+          "9": {
+            "text": {
+              "type": 47,
+              "playerColor": 1,
+              "cardsToBroadcast": [
+                5,
+                1,
+                1
+              ],
+              "distributionType": 0
+            },
+            "from": 1
+          }
+        },
+        "mechanicSettlementState": {
+          "1": {
+            "bankSettlementAmount": 3
+          }
+        }
+      },
+      "timeLeftInState": 4500
+    },
+    "sequence": 23
+  }
+}

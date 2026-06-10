@@ -1,0 +1,16 @@
+{
+  "action": 49,
+  "payload": {
+    "creator": 1,
+    "isBankTrade": true,
+    "counterOfferInResponseToTradeId": null,
+    "offeredResources": [
+      4,
+      4
+    ],
+    "wantedResources": [
+      2
+    ]
+  },
+  "sequence": 130
+}

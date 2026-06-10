@@ -1,0 +1,21 @@
+{
+  "id": "130",
+  "data": {
+    "type": 91,
+    "payload": {
+      "diff": {
+        "gameChatState": {
+          "0": {
+            "text": {
+              "type": 0,
+              "message": "hi",
+              "from": 2
+            }
+          }
+        }
+      },
+      "timeLeftInState": 14500.441
+    },
+    "sequence": 118
+  }
+}
