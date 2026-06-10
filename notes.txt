@@ -91,5 +91,7 @@ WS OUT (sequence always contains incrementing out_sequence):
         payload: 48 (48 for all of them idk why)
     Action 64 (win game? end game?)
         payload: true
-    Action 66 (hover/select to place a road or settlement off initial settlement)
+    Action 66 (hover/select to place a road or settlement off initial settlement) - first placement is sequence = 2
         payload: single number, represetnting the edge or vertex (ex: 71) or null if canceling
+        immediately sends null ws_out to cancel self and then does action 15 or 11 after confirmation
+    Action 67 (Glitch with WS?)
