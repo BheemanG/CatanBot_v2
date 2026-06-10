@@ -26,9 +26,11 @@ WS IN (sequence always contains incrementing in_sequence):
         can show enemy resource tiles surrounding settlement or be blank
         also shows which
     Type 30 (can be empty, or indicate available vertices for city upgrade)
-        empty payload
+        can indicate available vertices for placement settlement in payload
     Type 31: (available vertexes starter settlement can place road)
         payload: list of edges
+    Type 33: ()
+
     Type 43 (resource exchange, used after purchases/upgrades as well)
        givingPlayer, givingCards, recievingPLayer (0 for bank) recievingCards 
     Type 78 (idk, appears after initialization) 
@@ -91,7 +93,7 @@ WS OUT (sequence always contains incrementing out_sequence):
         payload: 48 (48 for all of them idk why)
     Action 64 (win game? end game?)
         payload: true
-    Action 66 (hover/select to place a road or settlement off initial settlement) - first placement is sequence = 2
+    Action 66 [USELESS] (hover/select to place a road or settlement off initial settlement) - first placement is sequence = 2
         payload: single number, represetnting the edge or vertex (ex: 71) or null if canceling
         immediately sends null ws_out to cancel self and then does action 15 or 11 after confirmation
     Action 67 (Glitch with WS?)
