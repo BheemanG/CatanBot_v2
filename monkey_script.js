@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Catan WS Logger
+// @name         Catan Bot
 // @namespace    http://tampermonkey.net/
-// @version      2.6
+// @version      3.0
 // @match        *://*.colonist.io/*
 // @run-at       document-start
 // @require      https://cdnjs.cloudflare.com/ajax/libs/msgpack-lite/0.1.26/msgpack.min.js
@@ -11,123 +11,123 @@
 // ==/UserScript==
 
 (function() {
-  console.log('[CATAN] Script loaded');
+    console.log('[CATAN] Script loaded');
 
-  function isInGame() {
-    return window.location.hash.length > 1;
-  }
+    function isInGame() {
+        return window.location.hash.length > 1;
+    }
 
-  let capturedHeader = null;
+    let capturedHeader = null;
 
-  const OriginalWebSocket = unsafeWindow.WebSocket;
+    const OriginalWebSocket = unsafeWindow.WebSocket;
 
-  function PatchedWebSocket(url, protocols) {
-    const ws = protocols
-      ? new OriginalWebSocket(url, protocols)
-      : new OriginalWebSocket(url);
+    function PatchedWebSocket(url, protocols) {
+        const ws = protocols
+        ? new OriginalWebSocket(url, protocols)
+        : new OriginalWebSocket(url);
 
-    ws.addEventListener('message', async (event) => {
-      try {
-        let uint8;
-        if (event.data instanceof Blob) {
-          const buf = await event.data.arrayBuffer();
-          uint8 = new Uint8Array(buf);
-        } else if (event.data instanceof ArrayBuffer) {
-          uint8 = new Uint8Array(event.data);
-        }
-        const decoded = msgpack.decode(uint8);
+        ws.addEventListener('message', async (event) => {
+            try {
+                let uint8;
+                if (event.data instanceof Blob) {
+                    const buf = await event.data.arrayBuffer();
+                    uint8 = new Uint8Array(buf);
+                } else if (event.data instanceof ArrayBuffer) {
+                    uint8 = new Uint8Array(event.data);
+                }
 
-        if (decoded?.id === '136') return;
-        if (!isInGame()) return;
+                const decoded = msgpack.decode(uint8);
 
-        console.log('[WS IN]', JSON.stringify(decoded, null, 2));
+                // filter heartbeats
+                if (decoded?.id === '136') return;
 
-        GM_xmlhttpRequest({
-          method: 'POST',
-          url: 'http://localhost:5000/incoming',
-          headers: { 'Content-Type': 'application/json' },
-          data: JSON.stringify(decoded),
-          onload: function(response) {
-            const result = JSON.parse(response.responseText);
-            if (result.actions && result.actions.length > 0) {
-              result.actions.forEach((item, i) => {
-                setTimeout(() => {
-                  unsafeWindow.catanSend(item.action, item.payload, item.sequence);
-                }, i * 500);
-              });
-            } else if (result.action !== null && result.action !== undefined) {
-              unsafeWindow.catanSend(result.action, result.payload, result.sequence);
+                // extract serverId from first game message to build header
+                if (decoded?.data?.type === 1 && decoded?.data?.payload?.serverId) {
+                    const serverId = decoded.data.payload.serverId;
+                    const idBytes = Array.from(serverId).map(c => c.charCodeAt(0));
+                    capturedHeader = new Uint8Array([3, 1, 6, ...idBytes]);
+                    console.log('[CATAN] Header captured from serverId:', serverId, Array.from(capturedHeader));
+                }
+
+                if (!isInGame()) return;
+
+                console.log('[WS IN]', JSON.stringify(decoded, null, 2));
+
+                GM_xmlhttpRequest({
+                    method: 'POST',
+                    url: 'http://localhost:5000/incoming',
+                    headers: { 'Content-Type': 'application/json' },
+                    data: JSON.stringify(decoded),
+                    onload: function(response) {
+                        const result = JSON.parse(response.responseText);
+                        if (result.actions && result.actions.length > 0) {
+                            result.actions.forEach((item, i) => {
+                                setTimeout(() => {
+                                    unsafeWindow.catanSend(item.action, item.payload, item.sequence);
+                                }, i * 500);
+                            });
+                        } else if (result.action !== null && result.action !== undefined) {
+                            unsafeWindow.catanSend(result.action, result.payload, result.sequence);
+                        }
+                    },
+                    onerror: function(e) {
+                        console.log('[CATAN] Python server not reachable', e);
+                    }
+                });
+
+            } catch(e) {
+                console.log('[WS IN RAW]', event.data, e);
             }
-          },
-          onerror: function(e) {
-            console.log('[CATAN] Python server not reachable', e);
-          }
         });
 
-      } catch(e) {
-        console.log('[WS IN RAW]', event.data, e);
-      }
-    });
+        const originalSend = ws.send.bind(ws);
+        ws.send = function(data) {
+            if (data instanceof ArrayBuffer || data instanceof Uint8Array) {
+                const bytes = new Uint8Array(data instanceof ArrayBuffer ? data : data.buffer);
+                if (bytes[0] === 4) return originalSend(data);
 
-    const originalSend = ws.send.bind(ws);
-    ws.send = function(data) {
-      if (data instanceof ArrayBuffer || data instanceof Uint8Array) {
-        const bytes = new Uint8Array(data instanceof ArrayBuffer ? data : data.buffer);
-        const msgType = bytes[0];
-        if (msgType === 4) return originalSend(data);
+                try {
+                    const payload = msgpack.decode(bytes.slice(9));
+                    console.log('[WS OUT]', JSON.stringify(payload, null, 2));
 
-        // capture header from any outgoing message and force game header bytes
-        const header = bytes.slice(0, 9);
-        header[0] = 3;
-        header[1] = 1;
-        header[2] = 6;
-        capturedHeader = header;
-        console.log('[WS HEADER CAPTURED]', Array.from(capturedHeader));
+                    if (!isInGame()) return originalSend(data);
 
-        try {
-          const payload = msgpack.decode(bytes.slice(9));
-          console.log('[WS OUT]', JSON.stringify(payload, null, 2));
+                    GM_xmlhttpRequest({
+                        method: 'POST',
+                        url: 'http://localhost:5000/outgoing',
+                        headers: { 'Content-Type': 'application/json' },
+                        data: JSON.stringify(payload),
+                        onerror: function(e) {}
+                    });
+                } catch(e) {
+                    console.log('[WS OUT BYTES]', Array.from(bytes));
+                }
+            }
+            return originalSend(data);
+        };
 
-          if (!isInGame()) return originalSend(data);
+        unsafeWindow._ws = ws;
+        unsafeWindow.catanSend = function(action, payload, sequence) {
+            if (!capturedHeader) {
+                console.log('[CATAN] No header yet — waiting for game to start');
+                return;
+            }
+            const encoded = msgpack.encode({ action, payload, sequence });
+            const full = new Uint8Array(capturedHeader.length + encoded.length);
+            full.set(capturedHeader);
+            full.set(encoded, capturedHeader.length);
+            unsafeWindow._ws.send(full.buffer);
+        };
 
-          GM_xmlhttpRequest({
-            method: 'POST',
-            url: 'http://localhost:5000/outgoing',
-            headers: { 'Content-Type': 'application/json' },
-            data: JSON.stringify(payload),
-            onerror: function(e) {}
-          });
-        } catch(e) {
-          console.log('[WS OUT BYTES]', Array.from(bytes));
-        }
-      } else {
-        console.log('[WS OUT RAW]', typeof data, data);
-      }
-      return originalSend(data);
-    };
+        return ws;
+    }
 
-    unsafeWindow._ws = ws;
-    unsafeWindow.catanSend = function(action, payload, sequence) {
-      if (!capturedHeader) {
-        console.log('[CATAN] No header captured yet — waiting for first outgoing message');
-        return;
-      }
-      const encoded = msgpack.encode({ action, payload, sequence });
-      const full = new Uint8Array(capturedHeader.length + encoded.length);
-      full.set(capturedHeader);
-      full.set(encoded, capturedHeader.length);
-      unsafeWindow._ws.send(full.buffer);
-    };
+    PatchedWebSocket.prototype = OriginalWebSocket.prototype;
+    PatchedWebSocket.CONNECTING = OriginalWebSocket.CONNECTING;
+    PatchedWebSocket.OPEN = OriginalWebSocket.OPEN;
+    PatchedWebSocket.CLOSING = OriginalWebSocket.CLOSING;
+    PatchedWebSocket.CLOSED = OriginalWebSocket.CLOSED;
 
-    return ws;
-  }
-
-  PatchedWebSocket.prototype = OriginalWebSocket.prototype;
-  PatchedWebSocket.CONNECTING = OriginalWebSocket.CONNECTING;
-  PatchedWebSocket.OPEN = OriginalWebSocket.OPEN;
-  PatchedWebSocket.CLOSING = OriginalWebSocket.CLOSING;
-  PatchedWebSocket.CLOSED = OriginalWebSocket.CLOSED;
-
-  unsafeWindow.WebSocket = PatchedWebSocket;
+    unsafeWindow.WebSocket = PatchedWebSocket;
 
 })();
