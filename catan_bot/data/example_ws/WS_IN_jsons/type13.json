@@ -1,0 +1,34 @@
+{
+  "id": "130",
+  "data": {
+    "type": 13,
+    "payload": {
+      "title": {
+        "key": "strings:game.prompts.discardCards"
+      },
+      "body": {
+        "key": "strings:game.prompts.youHaveMoreThanXCards",
+        "options": {
+          "count": 5,
+          "amountToDiscard": 3
+        }
+      },
+      "showCondensedCardInformation": false,
+      "selectCardFormat": {
+        "cancelButtonActive": false,
+        "allowableActionState": 28,
+        "amountOfCardsToSelect": 3,
+        "validCardsToSelect": [
+          3,
+          2,
+          3,
+          5,
+          3,
+          2
+        ],
+        "showCardBadge": true
+      }
+    },
+    "sequence": 113
+  }
+}

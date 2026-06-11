@@ -21,6 +21,8 @@ WS IN (sequence always contains incrementing in_sequence):
         lists tile locations + types, port locations, etc - see json
     Type 6 (sequence: 1)
         idk, boolean payload
+    Type 13 (I have to Discard)
+        see json
     Type 28 (shows who got a resource, and what type, and distribution type)
         DistributionType - placement is 0, dice roll is 1
         can show enemy resource tiles surrounding settlement or be blank
@@ -29,7 +31,8 @@ WS IN (sequence always contains incrementing in_sequence):
         can indicate available vertices for placement settlement in payload
     Type 31: (available vertexes starter settlement can place road)
         payload: list of edges
-    Type 33: ()
+    Type 33 (can place robber )
+        payload: available hexes to place
 
     Type 43 (resource exchange, used after purchases/upgrades as well)
        givingPlayer, givingCards, recievingPLayer (0 for bank) recievingCards 
