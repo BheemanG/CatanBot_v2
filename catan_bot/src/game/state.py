@@ -27,5 +27,4 @@ class GameState:
                 resource=hex_data.get('type'),
                 dice=hex_data.get('diceNumber')
             )
-        
-        print('[STATE] hexes parsed')
+        print('[STATE] Hexes Parsed')

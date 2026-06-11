@@ -31,7 +31,8 @@ def handle_incoming():
     data = request.json
 
     msg_id = data.get('id')
-    if msg_id != 130:
+    if msg_id != "130":
+        print(f'msg_id = {msg_id} - No Action')
         return no_action()
     
     msg_type = data.get('data', {}).get('type')
@@ -43,7 +44,7 @@ def handle_incoming():
     if action is None:
         return no_action()
     print(f'[WS OUT DRAFT] {action}')
-    return no_action()
+    return jsonify(action)
 
 @app.route('/outgoing', methods=['POST'])
 def handle_outgoing():
