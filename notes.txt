@@ -39,10 +39,55 @@ WS IN (sequence always contains incrementing in_sequence):
     Type 78 (idk, appears after initialization) 
         "isActive": true/false
         "hasUsedDisableRequest": true/false
-    Type 91 (map state after each update)
+
+    Type 91 (main game state updates)
         lists whos turn it is, and what edges are owned by who
         bankstate - resourceCards tells you how many of each resourece in bank if not full
         playerNUmber - resourceCards tells lists out the resourc enumber of each card
+        
+        "diff": {
+            "mapState": { #placed a settlement on vertex
+            "tileCornerStates": {
+                "7": { #vertex 7
+                "owner": 1, #playerID
+                "buildingType": 1 #settlement
+                }
+            }
+            "tileEdgeStates": {
+                "40": { #edge id
+                "owner": 2, #playerID
+                "type": 1 #idk
+                }
+            }
+            }
+
+            "playerStates": { #shows any updates to player states
+                "1": { #players 1's updated state
+                    "victoryPointsState": {
+                    "0": 2 #player now has 2 points
+                    },
+                    "resourceCards": {
+                    "cards": [ #player 1 now has these cards in hand? Will be 0s if player is not you
+                        4,
+                        1,
+                        4
+                    ]
+                    }
+                }
+            }
+
+            "currentState": { #sent to all players
+                "completedTurns": 1,
+                "actionState":
+                        0 = need to roll dice
+                        1 = #placing initial settlement?
+                        3 - #placing initial road?
+                "currentTurnPlayerColor": 2, #your turn
+                "turnState": 1 #player whos turn it is?
+                "startTime": 1781213494472,
+                "allocatedTime": 18000 #in seconds
+            },
+        }
 
 
 WS OUT (sequence always contains incrementing out_sequence):

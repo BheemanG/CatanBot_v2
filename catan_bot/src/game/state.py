@@ -6,6 +6,10 @@ class Hex:
         self.resource = resource
         self.dice     = dice
 
+class Player:
+    def __init__(self):
+        return
+
 class GameState:
     def __init__(self):
         self.hexes        = [None] * 19 #contains 19 Hex objects from parse_board
