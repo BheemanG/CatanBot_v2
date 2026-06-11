@@ -54,6 +54,9 @@
 
                 if (!isInGame()) return;
 
+                // temporarily filter type 91
+                if (decoded?.data?.type !== 91) return;
+
                 console.log('[WS IN]', JSON.stringify(decoded, null, 2));
 
                 GM_xmlhttpRequest({

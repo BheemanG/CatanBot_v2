@@ -46,6 +46,9 @@ WS IN (sequence always contains incrementing in_sequence):
         playerNUmber - resourceCards tells lists out the resourc enumber of each card
         
         "diff": {
+            "diceState": {
+                "diceThrown": false #someone needs to roll or true
+            },
             "mapState": { #placed a settlement on vertex
             "tileCornerStates": {
                 "7": { #vertex 7
@@ -76,13 +79,37 @@ WS IN (sequence always contains incrementing in_sequence):
                 }
             }
 
+            "mechanicDevelopmentCardsState": { #after soene buys a dev card
+                "bankDevelopmentCards": {    
+                    "cards": [ #lists dev cards in bank (up to 25), 10 is hidden generic dev card
+                        10, 10, 10...
+                    ]
+                }
+                "players": {
+                    "2": {
+                        "developmentCards": {
+                            "cards": [ #lists all dev cards as 10 for others (hidden), but real values for player, 
+                                10
+                            ]
+                        }
+                        "developmentCardsUsed": [#sent to everyone once activated
+                            11
+                        ],
+                        "hasUsedDevelopmentCardThisTurn": true #this player used a dev card this turn
+                    }
+                }
+            }
+            "mechanicRobberState": {#when robber moved, this is told
+                "locationTileIndex": 1 #hex where robber located
+            }
+        
             "currentState": { #sent to all players
                 "completedTurns": 1,
                 "actionState":
                         0 = need to roll dice
                         1 = #placing initial settlement?
                         3 - #placing initial road?
-                "currentTurnPlayerColor": 2, #your turn
+                "currentTurnPlayerColor": 2, #playerID of persons turn
                 "turnState": 1 #player whos turn it is?
                 "startTime": 1781213494472,
                 "allocatedTime": 18000 #in seconds
