@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Catan Bot
 // @namespace    http://tampermonkey.net/
-// @version      3.0
+// @version      3.2
 // @match        *://*.colonist.io/*
 // @run-at       document-start
 // @require      https://cdnjs.cloudflare.com/ajax/libs/msgpack-lite/0.1.26/msgpack.min.js
@@ -49,6 +49,9 @@
                     console.log('[CATAN] Header captured from serverId:', serverId, Array.from(capturedHeader));
                 }
 
+                // only process id 130 messages
+                if (decoded?.id !== '130') return;
+
                 if (!isInGame()) return;
 
                 console.log('[WS IN]', JSON.stringify(decoded, null, 2));
@@ -60,13 +63,7 @@
                     data: JSON.stringify(decoded),
                     onload: function(response) {
                         const result = JSON.parse(response.responseText);
-                        if (result.actions && result.actions.length > 0) {
-                            result.actions.forEach((item, i) => {
-                                setTimeout(() => {
-                                    unsafeWindow.catanSend(item.action, item.payload, item.sequence);
-                                }, i * 500);
-                            });
-                        } else if (result.action !== null && result.action !== undefined) {
+                        if (result.action !== null && result.action !== undefined) {
                             unsafeWindow.catanSend(result.action, result.payload, result.sequence);
                         }
                     },
@@ -82,12 +79,18 @@
 
         const originalSend = ws.send.bind(ws);
         ws.send = function(data) {
+            if (typeof data === 'string') return originalSend(data);
+
             if (data instanceof ArrayBuffer || data instanceof Uint8Array) {
                 const bytes = new Uint8Array(data instanceof ArrayBuffer ? data : data.buffer);
                 if (bytes[0] === 4) return originalSend(data);
 
                 try {
                     const payload = msgpack.decode(bytes.slice(9));
+
+                    // ignore if decoded result is just a string
+                    if (typeof payload === 'string') return originalSend(data);
+
                     console.log('[WS OUT]', JSON.stringify(payload, null, 2));
 
                     if (!isInGame()) return originalSend(data);
