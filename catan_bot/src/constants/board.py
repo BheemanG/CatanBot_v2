@@ -1,10 +1,18 @@
-RESOURCE_TYPES = {
+RSC_TYPES = {
     0: 'desert',
     1: 'lumber',
     2: 'brick',
     3: 'wool',
     4: 'grain',
     5: 'ore',
+}
+
+RSC_IDS = {
+    'lumber': 1,
+    'brick': 2,
+    'wool': 3,
+    'grain': 4,
+    'ore': 5,
 }
 
 DICE_VALUE = {

@@ -7,6 +7,7 @@ app = Flask(__name__)
 CORS(app)
 
 ALLOWED_ORIGIN = 'https://colonist.io'
+
 state = GameState()
 
 def check_origin():
