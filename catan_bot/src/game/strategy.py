@@ -16,9 +16,6 @@ from src.game.graph import (
     adjacent_edges,
 )
 
-from src.game.state import (
-    gain_resources
-)
 
 def score_hex(h):
     value = DICE_VALUE.get(h.dice, 0)

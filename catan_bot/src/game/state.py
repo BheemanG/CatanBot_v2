@@ -55,7 +55,9 @@ class GameState:
         return self.out_sequence
 
     def parse_board(self, msg_payload):
-        if msg_payload.get('gameSettings').get('id') != self.id:
+        game_id = msg_payload.get('gameSettings', {}).get('id')
+        if game_id != self.id:
+            self.id = game_id
             self.my_color = msg_payload.get('playerColor')
 
             #fills self.players
@@ -75,13 +77,15 @@ class GameState:
         print('[STATE] Not Updated')
 
     def update(self, diff):
-        for v_id in diff.get('mapState').get('tileCornerStates'):
-            if (v_id.get('buildingType' == 1)):
-                self.players[v_id.get('owner')].place_settlement(v_id)
-            elif (v_id.get('buildingType' == 2)):
-                self.players[v_id.get('owner')].upgrade_city(v_id)
-        for e_id in diff.get('mapState').get('tileEdgeStates'):
-            self.players[e_id.get('owner')].place_road(e_id)
-        for p_id in diff.get('mapState').get('playerStates'):
-            self.players[p_id].update_vp(p_id.get('victoryPointsState').get('0'))
-        
+        map_state = diff.get('mapState', {})
+        for v_id, v_data in map_state.get('tileCornerStates', {}).items():
+            if v_data.get('buildingType') == 1:
+                self.players[v_data.get('owner')].place_settlement(int(v_id))
+            elif v_data.get('buildingType') == 2:
+                self.players[v_data.get('owner')].upgrade_city(int(v_id))
+        for e_id, e_data in map_state.get('tileEdgeStates', {}).items():
+            self.players[e_data.get('owner')].place_road(int(e_id))
+        for p_id, p_data in diff.get('playerStates', {}).items():
+            vp = p_data.get('victoryPointsState', {}).get('0')
+            if vp is not None:
+                self.players[int(p_id)].update_vp(vp)
