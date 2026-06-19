@@ -76,6 +76,7 @@ class GameState:
             return
         print('[STATE] Not Updated')
 
+    #when recieve type 91
     def update(self, diff):
         map_state = diff.get('mapState', {})
         for v_id, v_data in map_state.get('tileCornerStates', {}).items():
