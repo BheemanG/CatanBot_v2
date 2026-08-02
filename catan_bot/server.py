@@ -47,6 +47,50 @@ def handle_incoming():
     print(f'[WS OUT DRAFT] {action}')
     return jsonify(action)
 
+@app.route('/state/ui', methods=['GET'])
+def handle_state_ui():
+    return '''<!doctype html>
+<html><head><title>Catan State</title>
+<style>
+  body { background: #1e1e1e; color: #d4d4d4; font-family: monospace; padding: 16px; margin: 0; }
+  pre  { font-size: 13px; line-height: 1.5; }
+</style>
+</head><body>
+<pre id="s">Loading...</pre>
+<script>
+function refresh() {
+    fetch('/state').then(r => r.json()).then(d => {
+        document.getElementById('s').textContent = JSON.stringify(d, null, 2);
+    });
+}
+refresh();
+setInterval(refresh, 1000);
+</script>
+</body></html>'''
+
+@app.route('/state', methods=['GET'])
+def handle_state():
+    players_out = {}
+    for color, p in state.players.items():
+        players_out[color] = {
+            'resources': p.resources,
+            'settlements': p.settlements,
+            'cities': p.cities,
+            'roads': p.roads,
+            'vp': p.vp,
+        }
+    return jsonify({
+        'game_id':      state.id,
+        'my_color':     state.my_color,
+        'current_turn': state.current_turn,
+        'action_state': state.action_state,
+        'turn_state':   state.turn_state,
+        'dice_thrown':  state.dice_thrown,
+        'players':      players_out,
+        'robber_hex':   state.robber_hex,
+        'vertices':     [v for v in state.vertices],
+    })
+
 @app.route('/outgoing', methods=['POST'])
 def handle_outgoing():
     check_origin()
