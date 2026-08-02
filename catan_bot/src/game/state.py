@@ -45,9 +45,7 @@ class GameState:
         self.vertices     = [None] * 54 #contains id of occupying player, 0 if unoccupied
         self.my_color     = None
         self.current_turn = None
-        self.action_state = None
         self.turn_state   = None
-        self.dice_thrown  = False
         self.edges        = [None] * 72
         self.robber_hex    = None
         self.active_offers = {}  # trade_id -> offer dict
@@ -67,38 +65,67 @@ class GameState:
         return self.out_sequence
 
     def parse_board(self, msg_payload):
-        game_id = msg_payload.get('gameSettings', {}).get('id')
-        if game_id != self.id:
-            self.id = game_id
-            self.my_color = msg_payload.get('playerColor')
+        self.id           = msg_payload.get('gameSettings', {}).get('id')
+        self.my_color     = msg_payload.get('playerColor')
+        self.vertices     = [None] * 54
+        self.edges        = [None] * 72
+        self.current_turn = None
+        self.turn_state   = None
+        self.active_offers = {}
+        self.out_sequence = 1
 
-            #fills self.players
-            self.players = {0: self._make_bank()}
-            for p in msg_payload.get('playerUserStates'):
-                self.players[p.get('selectedColor')] = Player()
+        self.players = {0: self._make_bank()}
+        for p in msg_payload.get('playerUserStates'):
+            self.players[p.get('selectedColor')] = Player()
 
-            #fills self.hexes
-            tiles = msg_payload.get('gameState', {}).get('mapState', {}).get('tileHexStates', {})
-            for hex_id, hex_data in tiles.items():
-                self.hexes[int(hex_id)] = Hex(
-                    hex_id=int(hex_id),
-                    resource=hex_data.get('type'),
-                    dice=hex_data.get('diceNumber')
-                )
-            self.robber_hex = next(
-                int(hid) for hid, h in tiles.items() if h.get('type') == 0
+        map_state = msg_payload.get('gameState', {}).get('mapState', {})
+
+        tiles = map_state.get('tileHexStates', {})
+        for hex_id, hex_data in tiles.items():
+            self.hexes[int(hex_id)] = Hex(
+                hex_id=int(hex_id),
+                resource=hex_data.get('type'),
+                dice=hex_data.get('diceNumber')
             )
-            print('[STATE] Hexes Parsed')
-            return
-        print('[STATE] Not Updated')
+        self.robber_hex = next(
+            int(hid) for hid, h in tiles.items() if h.get('type') == 0
+        )
+
+        for v_id, v_data in map_state.get('tileCornerStates', {}).items():
+            v_id = int(v_id)
+            owner = v_data.get('owner')
+            if owner is None:
+                continue
+            building = v_data.get('buildingType')
+            if building == 1:
+                self.vertices[v_id] = owner
+                self.players[owner].place_settlement(v_id)
+            elif building == 2:
+                self.vertices[v_id] = owner
+                self.players[owner].upgrade_city(v_id)
+
+        for e_id, e_data in map_state.get('tileEdgeStates', {}).items():
+            owner = e_data.get('owner')
+            if owner is None:
+                continue
+            e_id = int(e_id)
+            self.edges[e_id] = owner
+            self.players[owner].place_road(e_id)
+
+        current = msg_payload.get('currentState', {})
+        if 'currentTurnPlayerColor' in current:
+            self.current_turn = current['currentTurnPlayerColor']
+        if 'turnState' in current:
+            self.turn_state = current['turnState']
+
+        for offer_id, offer in msg_payload.get('tradeState', {}).get('activeOffers', {}).items():
+            self.active_offers[offer_id] = offer
+
+        print('[STATE] Board Initialized')
 
     def update(self, diff):
         if diff is None:
             return
-
-        dice = diff.get('diceState', {})
-        if 'diceThrown' in dice:
-            self.dice_thrown = dice['diceThrown']
 
         for rsc_id, count in diff.get('bankState', {}).get('resourceCards', {}).items():
             self.players[0].resources[int(rsc_id)] = count
@@ -134,16 +161,15 @@ class GameState:
         if 'locationTileIndex' in robber:
             self.robber_hex = robber['locationTileIndex']
 
-        trade_state = diff.get('tradeState', {})
-        for offer_id, offer in trade_state.get('activeOffers', {}).items():
-            self.active_offers[offer_id] = offer
-        for offer_id in trade_state.get('closedOffers', {}):
-            self.active_offers.pop(offer_id, None)
+        # null value = offer closed/cancelled; non-null = active offer
+        for offer_id, offer in diff.get('tradeState', {}).get('activeOffers', {}).items():
+            if offer is None:
+                self.active_offers.pop(offer_id, None)
+            else:
+                self.active_offers[offer_id] = offer
 
         current = diff.get('currentState', {})
         if 'currentTurnPlayerColor' in current:
             self.current_turn = current['currentTurnPlayerColor']
-        if 'actionState' in current:
-            self.action_state = current['actionState']
         if 'turnState' in current:
             self.turn_state = current['turnState']

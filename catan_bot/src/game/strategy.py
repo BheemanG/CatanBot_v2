@@ -4,7 +4,8 @@ from src.constants.board import (
     RSC_IDS,
     DICE_VALUE,
     EDGE_TO_VERTICES,
-    VERTEX_TO_HEXES
+    VERTEX_TO_HEXES,
+    HEX_TO_VERTICES,
 )
 from src.constants.message_types import MsgType, Action
 from src.game.graph import (
@@ -68,10 +69,46 @@ def valid_road_spots(state):
                 break
     return valid
 
+def reachable_settleable_vertices(candidate_edge, state):
+    my_color = state.my_color
+    visited = set()
+    queue = []
+
+    for v in EDGE_TO_VERTICES[candidate_edge]:
+        owner = state.vertices[v]
+        if owner is None or owner == my_color:
+            visited.add(v)
+            queue.append(v)
+
+    i = 0
+    while i < len(queue):
+        v = queue[i]; i += 1
+        for e in adjacent_edges(v):
+            edge_owner = state.edges[e]
+            if edge_owner is not None and edge_owner != my_color:
+                continue  # opponent road blocks this edge
+            for nv in EDGE_TO_VERTICES[e]:
+                if nv in visited:
+                    continue
+                nv_owner = state.vertices[nv]
+                if nv_owner is not None and nv_owner != my_color:
+                    continue  # opponent settlement blocks traversal
+                visited.add(nv)
+                queue.append(nv)
+
+    return [
+        v for v in visited
+        if state.vertices[v] is None
+        and not any(state.vertices[n] is not None for n in neighbors(v))
+    ]
+
 def best_road(road_spots, state):
-    return max(road_spots, key=lambda e: max(
-        score_vertex(v, state) for v in EDGE_TO_VERTICES[e]
-    ))
+    def road_score(e):
+        reachable = reachable_settleable_vertices(e, state)
+        if not reachable:
+            return -1
+        return max(score_vertex(v, state) for v in reachable)
+    return max(road_spots, key=road_score)
 
 def calculate_placement_settlement(state, msg_payload):
     vertex = max(msg_payload, key=lambda v_id: score_vertex(v_id, state))
@@ -80,6 +117,17 @@ def calculate_placement_settlement(state, msg_payload):
 
 def calculate_placement_road(state, msg_payload):
     return random.choice(msg_payload)
+
+def score_robber_hex(hex_id, state):
+    my_color = state.my_color
+    hex_vertices = HEX_TO_VERTICES.get(hex_id, [])
+    if any(state.vertices[v] == my_color for v in hex_vertices):
+        return -1  # never block ourselves
+    opponent_count = sum(
+        1 for v in hex_vertices
+        if state.vertices[v] is not None and state.vertices[v] != my_color
+    )
+    return opponent_count * DICE_VALUE.get(state.hexes[hex_id].dice, 0)
 
 def decide_turn(state):
     player = state.my_player()
@@ -123,6 +171,28 @@ def decide(msg_type, msg_payload, state):
         return {
             "action": Action.PLACE_INITIAL_ROAD,
             "payload": calculate_placement_road(state, msg_payload),
+            "sequence": state.next_sequence()
+        }
+
+    elif msg_type == MsgType.DISCARD:
+        card_format = msg_payload.get('selectCardFormat', {})
+        hand = card_format.get('validCardsToSelect', [])
+        n = card_format.get('amountOfCardsToSelect', 0)
+        # discard most-held cards first; break ties by least valuable (lumber=1 first, ore=5 last)
+        counts = {}
+        for c in hand:
+            counts[c] = counts.get(c, 0) + 1
+        least_valuable = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4}
+        to_discard = sorted(hand, key=lambda c: (-counts[c], least_valuable.get(c, 99)))[:n]
+        time.sleep(1.0)
+        return {"action": Action.CONFIRM_DISCARD, "payload": to_discard, "sequence": state.next_sequence()}
+
+    elif msg_type == MsgType.AVAILABLE_ROBBER_PLACEMENTS and msg_payload:
+        time.sleep(1.0)
+        best = max(msg_payload, key=lambda h: score_robber_hex(h, state))
+        return {
+            "action": Action.PLACE_ROBBER,
+            "payload": best,
             "sequence": state.next_sequence()
         }
 

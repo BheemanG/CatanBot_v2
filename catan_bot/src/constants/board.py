@@ -161,3 +161,8 @@ VERTEX_TO_HEXES = {
     52: [15, 16, 18],
     53: [16, 17, 18],
 }
+
+HEX_TO_VERTICES = {}
+for _v, _hexes in VERTEX_TO_HEXES.items():
+    for _h in _hexes:
+        HEX_TO_VERTICES.setdefault(_h, []).append(_v)
