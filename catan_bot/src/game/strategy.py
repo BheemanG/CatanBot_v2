@@ -1,4 +1,4 @@
-import random, time
+import time
 from src.constants.board import (
     RSC_TYPES,
     RSC_IDS,
@@ -110,13 +110,43 @@ def best_road(road_spots, state):
         return max(score_vertex(v, state) for v in reachable)
     return max(road_spots, key=road_score)
 
+def score_vertex_initial(v_id, state):
+    """Pip total + bonus pips for each resource type not yet in our portfolio.
+    Doubles the contribution of hexes that add a new unique resource, rewarding
+    both raw productivity and diversity between the two starting settlements."""
+    covered = set()
+    for v, owner in enumerate(state.vertices):
+        if owner == state.my_color:
+            for h_id in VERTEX_TO_HEXES[v]:
+                h = state.hexes[h_id]
+                if h and h.resource and h.resource != 0:
+                    covered.add(h.resource)
+    seen = set()
+    score = 0
+    for h_id in VERTEX_TO_HEXES[v_id]:
+        h = state.hexes[h_id]
+        if not h or not h.resource or h.resource == 0:
+            continue
+        pip = DICE_VALUE.get(h.dice, 0)
+        score += pip
+        if h.resource not in covered and h.resource not in seen:
+            score += pip  # double-count first occurrence of each new resource type
+            seen.add(h.resource)
+    return score
+
 def calculate_placement_settlement(state, msg_payload):
-    vertex = max(msg_payload, key=lambda v_id: score_vertex(v_id, state))
+    vertex = max(msg_payload, key=lambda v_id: score_vertex_initial(v_id, state))
     state.vertices[vertex] = state.my_color
     return vertex
 
 def calculate_placement_road(state, msg_payload):
-    return random.choice(msg_payload)
+    """Point toward the highest-scoring future settlement vertex reachable from this road."""
+    my_vertices = {v for v, owner in enumerate(state.vertices) if owner == state.my_color}
+    def road_score(edge_id):
+        v1, v2 = EDGE_TO_VERTICES[edge_id]
+        target = v2 if v1 in my_vertices else v1
+        return score_vertex_initial(target, state)
+    return max(msg_payload, key=road_score)
 
 def score_robber_hex(hex_id, state):
     my_color = state.my_color
@@ -128,6 +158,96 @@ def score_robber_hex(hex_id, state):
         if state.vertices[v] is not None and state.vertices[v] != my_color
     )
     return opponent_count * DICE_VALUE.get(state.hexes[hex_id].dice, 0)
+
+def board_income(state):
+    """Expected dice-weighted income per resource type from our current board position."""
+    income = {r: 0 for r in range(1, 6)}
+    player = state.my_player()
+    for v_id, owner in enumerate(state.vertices):
+        if owner != state.my_color:
+            continue
+        mult = 2 if v_id in player.cities else 1
+        for h_id in VERTEX_TO_HEXES[v_id]:
+            h = state.hexes[h_id]
+            if h and h.resource and h.resource != 0:
+                income[h.resource] += DICE_VALUE.get(h.dice, 0) * mult
+    return income
+
+def resource_need_score(r, income, state):
+    """Higher = more beneficial to trade for this resource.
+    Favours resources we generate little of and need for upcoming builds."""
+    player = state.my_player()
+    count = player.resources.get(r, 0)
+
+    settlement_spots = valid_settlement_spots(state)
+    city_spots = valid_city_spots(state)
+    road_spots = valid_road_spots(state)
+    demand = (
+        SETTLEMENT_COST.get(r, 0) * (3 if settlement_spots else 0)
+        + CITY_COST.get(r, 0) * (3 if city_spots else 0)
+        + ROAD_COST.get(r, 0) * (1 if (not settlement_spots and road_spots) else 0)
+        + DEV_CARD_COST.get(r, 0)
+    )
+    return (demand + 1) / (income.get(r, 0) + 1) / (count + 1)
+
+def try_bank_trade(state):
+    player = state.my_player()
+    res = player.resources
+
+    give_pool = [r for r in range(1, 6) if res.get(r, 0) >= 4]
+    if not give_pool:
+        return None
+
+    # proactive: any resource at 5+ risks a discard on a 7 — trade it down now
+    has_surplus = any(res.get(r, 0) >= 5 for r in give_pool)
+
+    if not has_surplus:
+        # targeted: only trade if one trade closes a single-resource deficit for a build
+        settlement_spots = valid_settlement_spots(state)
+        city_spots = valid_city_spots(state)
+        road_spots = valid_road_spots(state)
+        goals = []
+        if settlement_spots:
+            goals.append(SETTLEMENT_COST)
+        if city_spots:
+            goals.append(CITY_COST)
+        if not settlement_spots and road_spots:
+            goals.append(ROAD_COST)
+        goals.append(DEV_CARD_COST)
+
+        can_unlock = any(
+            res.get(needed, 0) < amt
+            and any(r != needed for r in give_pool)
+            for cost in goals
+            for needed, amt in cost.items()
+            if res.get(needed, 0) < amt
+        )
+        if not can_unlock:
+            return None
+
+    # want: highest-need resource we don't already have 4+ of
+    income = board_income(state)
+    want_candidates = [r for r in range(1, 6) if r not in give_pool]
+    if not want_candidates:
+        want_candidates = sorted(range(1, 6), key=lambda r: res.get(r, 0))
+
+    want = max(want_candidates, key=lambda r: resource_need_score(r, income, state))
+    give = max(give_pool, key=lambda r: res.get(r, 0))
+
+    if give == want:
+        return None
+
+    return {
+        "action": Action.SEND_TRADE,
+        "payload": {
+            "creator": state.my_color,
+            "isBankTrade": True,
+            "counterOfferInResponseToTradeId": None,
+            "offeredResources": [give] * 4,
+            "wantedResources": [want],
+        },
+        "sequence": state.next_sequence(),
+    }
 
 def decide_turn(state):
     player = state.my_player()
@@ -145,6 +265,14 @@ def decide_turn(state):
     road_spots = valid_road_spots(state)
     if not settlement_spots and road_spots and can_afford(player, ROAD_COST):
         return {"action": Action.BUILD_ROAD, "payload": best_road(road_spots, state), "sequence": state.next_sequence()}
+
+    trade = try_bank_trade(state)
+    if trade:
+        return trade
+
+    if not state.dev_card_played and 13 in player.dev_cards:
+        state.dev_card_played = True
+        return {"action": Action.CONFIRM_DEV_CARD, "payload": 13, "sequence": state.next_sequence()}
 
     if can_afford(player, DEV_CARD_COST):
         return {"action": Action.BUY_DEV_CARD, "payload": True, "sequence": state.next_sequence()}
@@ -179,6 +307,21 @@ def decide(msg_type, msg_payload, state):
         target = max(candidates, key=lambda c: sum(state.players[c].resources.values()))
         time.sleep(0.5)
         return {"action": Action.STEAL_FROM_PLAYER, "payload": target, "sequence": state.next_sequence()}
+
+    elif msg_type == MsgType.MONOPOLY_PROMPT:
+        # pick resource that maximises (what opponents hold) * (how much we need it)
+        income = board_income(state)
+        opponent_totals = {r: 0 for r in range(1, 6)}
+        for color, player in state.players.items():
+            if color != state.my_color and color != 0:
+                for r, count in player.resources.items():
+                    opponent_totals[r] += count
+        chosen = max(
+            range(1, 6),
+            key=lambda r: opponent_totals[r] * resource_need_score(r, income, state)
+        )
+        time.sleep(0.5)
+        return {"action": Action.CONFIRM_DISCARD, "payload": [chosen], "sequence": state.next_sequence()}
 
     elif msg_type == MsgType.DISCARD:
         card_format = msg_payload.get('selectCardFormat', {})
@@ -216,28 +359,42 @@ def decide(msg_type, msg_payload, state):
         diff = msg_payload.get('diff', {})
         current_diff = diff.get('currentState', {})
         state.update(diff)
-        # only roll if this diff explicitly set turnState=1 (transition event, not repeated state)
+
+        # turnState=1 transition on our turn — set flag and optionally play knight first
         if (
             current_diff.get('turnState') == 1
             and current_diff.get('currentTurnPlayerColor') == state.my_color
         ):
+            state.needs_roll = True
+            player = state.my_player()
+            if not state.dev_card_played and 11 in player.dev_cards:
+                state.dev_card_played = True
+                time.sleep(1.0)
+                return {"action": Action.CONFIRM_DEV_CARD, "payload": 11, "sequence": state.next_sequence()}
+
+        # roll when flagged — fires after knight+robber interruption resolves
+        if state.needs_roll and state.current_turn == state.my_color and state.turn_state == 1:
+            state.needs_roll = False
             time.sleep(1.5)
-            return {
-                "action": Action.ROLL_DICE,
-                "payload": True,
-                "sequence": state.next_sequence()
-            }
+            return {"action": Action.ROLL_DICE, "payload": True, "sequence": state.next_sequence()}
+
+        # respond to pending enemy trade offers before taking any turn action
+        my_color_str = str(state.my_color)
+        for offer_id, offer in state.active_offers.items():
+            if (
+                offer.get('creator') != state.my_color
+                and my_color_str not in offer.get('playerResponses', {})
+                and offer_id not in state.responded_offers
+            ):
+                state.responded_offers.add(offer_id)
+                return {
+                    "action": Action.RESPOND_TO_TRADE,
+                    "payload": {"id": offer_id, "response": 1},
+                    "sequence": state.next_sequence()
+                }
+
         if state.current_turn == state.my_color and state.turn_state == 2:
             time.sleep(1.0)
             return decide_turn(state)
-
-        my_color_str = str(state.my_color)
-        for offer_id, offer in state.active_offers.items():
-            if offer.get('creator') != state.my_color and my_color_str not in offer.get('playerResponses', {}):
-                return {
-                    "action": Action.RESPOND_TO_TRADE,
-                    "payload": {"id": offer_id, "response": 1},  # 1 = decline
-                    "sequence": state.next_sequence()
-                }
 
     return None

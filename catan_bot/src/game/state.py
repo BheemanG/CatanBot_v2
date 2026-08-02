@@ -47,9 +47,12 @@ class GameState:
         self.current_turn = None
         self.turn_state   = None
         self.edges        = [None] * 72
-        self.robber_hex    = None
-        self.active_offers = {}  # trade_id -> offer dict
-        self.out_sequence  = 1
+        self.robber_hex       = None
+        self.active_offers    = {}    # trade_id -> offer dict
+        self.responded_offers = set() # offer IDs we've already sent action 50 for
+        self.needs_roll       = False # True after turnState=1 transition; cleared on roll
+        self.dev_card_played  = False # True after playing a dev card this turn
+        self.out_sequence     = 1
         self.players = {0: self._make_bank()}
     
     def _make_bank(self):
@@ -71,8 +74,11 @@ class GameState:
         self.edges        = [None] * 72
         self.current_turn = None
         self.turn_state   = None
-        self.active_offers = {}
-        self.out_sequence = 1
+        self.active_offers    = {}
+        self.responded_offers = set()
+        self.needs_roll       = False
+        self.dev_card_played  = False
+        self.out_sequence     = 1
 
         self.players = {0: self._make_bank()}
         for p in msg_payload.get('playerUserStates'):
@@ -157,6 +163,12 @@ class GameState:
                     if c > 0:
                         player.resources[c] += 1
 
+        dev_state = diff.get('mechanicDevelopmentCardsState', {})
+        my_dev = dev_state.get('players', {}).get(str(self.my_color), {})
+        dev_cards = my_dev.get('developmentCards', {}).get('cards')
+        if dev_cards is not None:
+            self.my_player().dev_cards = list(dev_cards)
+
         robber = diff.get('mechanicRobberState', {})
         if 'locationTileIndex' in robber:
             self.robber_hex = robber['locationTileIndex']
@@ -165,11 +177,16 @@ class GameState:
         for offer_id, offer in diff.get('tradeState', {}).get('activeOffers', {}).items():
             if offer is None:
                 self.active_offers.pop(offer_id, None)
+                self.responded_offers.discard(offer_id)
             else:
                 self.active_offers[offer_id] = offer
 
         current = diff.get('currentState', {})
         if 'currentTurnPlayerColor' in current:
+            if current['currentTurnPlayerColor'] != self.current_turn:
+                # turn changed — reset per-turn flags
+                self.needs_roll      = False
+                self.dev_card_played = False
             self.current_turn = current['currentTurnPlayerColor']
         if 'turnState' in current:
             self.turn_state = current['turnState']

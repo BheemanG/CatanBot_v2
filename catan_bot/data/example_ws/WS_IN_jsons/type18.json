@@ -1,0 +1,17 @@
+{
+  "id": "130",
+  "data": {
+    "type": 18,
+    "payload": {
+      "developmentCardUsed": 13,
+      "selectCardFormat": {
+        "cancelButtonActive": true,
+        "allowableActionState": 33,
+        "amountOfCardsToSelect": 1,
+        "validCardsToSelect": [1, 2, 3, 4, 5],
+        "showCardBadge": false
+      }
+    },
+    "sequence": 356
+  }
+}
