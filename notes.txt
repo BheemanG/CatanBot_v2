@@ -1,177 +1,257 @@
-Desert(0), Lumber(1), Brick(2), Wool(3), Grain(4), Ore(5)
+================================================================================
+  CATAN BOT REFERENCE
+================================================================================
 
-Vertices (settlements/cities) - 54
-Edges (roads) - 72
-Tiles - 19
-
-bank is player0
-blue is player1
-red is player2
-
-in_sequence: message count for WS IN, starting at 1, += 1 every message
-out_sequence: message count for WS OUT, starting at 1, += 1 every message
-id: game id (consistent all game) ex: "130"
+RESOURCES      Desert=0  Lumber=1  Brick=2  Wool=3  Grain=4  Ore=5
+BOARD          54 vertices (settlements/cities), 72 edges (roads), 19 hex tiles
+PLAYERS        bank=0  blue=1  red=2
+SEQUENCES      in_sequence: WS IN counter, starts at 1, +1 per message
+               out_sequence: WS OUT counter, starts at 1, +1 per message
+GAME ID        "id" field on every message, e.g. "130" — consistent all game
 
 
+================================================================================
+  WS IN MESSAGES
+================================================================================
+All messages include an incrementing in_sequence.
 
-WS IN (sequence always contains incrementing in_sequence):
-    Type 1 (game settings)
-        lists settings, see json
-    Type 4 (main map initialization and layout)
-        lists tile locations + types, port locations, etc - see json
-    Type 6 (sequence: 1)
-        idk, boolean payload
-    Type 13 (I have to Discard)
-        see json
-    Type 28 (shows who got a resource, and what type, and distribution type)
-        DistributionType - placement is 0, dice roll is 1
-        can show enemy resource tiles surrounding settlement or be blank
-        also shows which
-    Type 30 (can be empty, or indicate available vertices for city upgrade)
-        can indicate available vertices for placement settlement in payload
-    Type 31: (available vertexes starter settlement can place road)
-        payload: list of edges
-    Type 33 (can place robber )
-        payload: available hexes to place
+--------------------------------------------------------------------------------
+TYPE 1 — Game Settings
+--------------------------------------------------------------------------------
+  Lists match settings. See type1.json.
 
-    Type 43 (resource exchange, used after purchases/upgrades as well)
-       givingPlayer, givingCards, recievingPLayer (0 for bank) recievingCards 
-    Type 78 (idk, appears after initialization) 
-        "isActive": true/false
-        "hasUsedDisableRequest": true/false
+--------------------------------------------------------------------------------
+TYPE 4 — Full Game State Snapshot (source of truth)
+--------------------------------------------------------------------------------
+  Sent on connect/reconnect. Always triggers a full state reset in the bot.
+  Contains the same fields as type 91 diffs but at the top level of payload:
 
-    Type 91 (main game state updates)
-        lists whos turn it is, and what edges are owned by who
-        bankstate - resourceCards tells you how many of each resourece in bank if not full
-        playerNUmber - resourceCards tells lists out the resourc enumber of each card
-        
-        "diff": {
-            "diceState": {
-                "diceThrown": false #someone needs to roll or true
-            },
-            "mapState": { #placed a settlement on vertex
-            "tileCornerStates": {
-                "7": { #vertex 7
-                "owner": 1, #playerID
-                "buildingType": 1 #settlement
-                }
-            }
-            "tileEdgeStates": {
-                "40": { #edge id
-                "owner": 2, #playerID
-                "type": 1 #idk
-                }
-            }
-            }
+  payload.gameState.mapState.tileHexStates      hex resource types + dice numbers
+  payload.gameState.mapState.tileCornerStates   placed settlements/cities
+  payload.gameState.mapState.tileEdgeStates     placed roads
+  payload.currentState                          turnState, currentTurnPlayerColor
+  payload.tradeState.activeOffers               active trade offers
 
-            "playerStates": { #shows any updates to player states
-                "1": { #players 1's updated state
-                    "victoryPointsState": {
-                    "0": 2 #player now has 2 points
-                    },
-                    "resourceCards": {
-                    "cards": [ #player 1 now has these cards in hand? Will be 0s if player is not you
-                        4,
-                        1,
-                        4
-                    ]
-                    }
-                }
-            }
+--------------------------------------------------------------------------------
+TYPE 6 — Unknown (sequence 1)
+--------------------------------------------------------------------------------
+  Boolean payload. Purpose unknown. Ignored by bot.
 
-            "mechanicDevelopmentCardsState": { #after soene buys a dev card
-                "bankDevelopmentCards": {    
-                    "cards": [ #lists dev cards in bank (up to 25), 10 is hidden generic dev card
-                        10, 10, 10...
-                    ]
-                }
-                "players": {
-                    "2": {
-                        "developmentCards": {
-                            "cards": [ #lists all dev cards as 10 for others (hidden), but real values for player, 
-                                10
-                            ]
-                        }
-                        "developmentCardsUsed": [#sent to everyone once activated
-                            11
-                        ],
-                        "hasUsedDevelopmentCardThisTurn": true #this player used a dev card this turn
-                    }
-                }
-            }
-            "mechanicRobberState": {#when robber moved, this is told
-                "locationTileIndex": 1 #hex where robber located
-            }
-        
-            "currentState": { #sent to all players
-                "completedTurns": 1,
-                "actionState":
-                        0 = need to roll dice
-                        1 = #placing initial settlement?
-                        3 - #placing initial road?
-                "currentTurnPlayerColor": 2, #playerID of persons turn
-                "turnState": 1 #player whos turn it is?
-                "startTime": 1781213494472,
-                "allocatedTime": 18000 #in seconds
-            },
-        }
+--------------------------------------------------------------------------------
+TYPE 13 — Discard Prompt (7+ cards after a 7 is rolled)
+--------------------------------------------------------------------------------
+  payload.selectCardFormat:
+    validCardsToSelect    list of card IDs currently in hand (e.g. [3, 2, 3, 5])
+    amountOfCardsToSelect number of cards that must be discarded
+
+  Bot responds with action 7 only (action 8 not needed).
+
+--------------------------------------------------------------------------------
+TYPE 28 — Resource Distribution
+--------------------------------------------------------------------------------
+  Shows who received a resource and why.
+  distributionType: 0=initial placement, 1=dice roll
+  May be empty or omit enemy card details.
+
+--------------------------------------------------------------------------------
+TYPE 29 — Choose Player to Steal From (after robber placement)
+--------------------------------------------------------------------------------
+  Sent after the bot places the robber on a hex that has multiple opponents.
+  payload:
+    playersToSelect   list of player colors that can be stolen from (e.g. [3, 2])
+    isPirate          false for land robber, true for pirate (seafarers)
+
+  Bot responds with action 5, payload = chosen player color.
+
+--------------------------------------------------------------------------------
+TYPE 30 — Available Vertex Selections (dual purpose)
+--------------------------------------------------------------------------------
+  Dual purpose depending on context:
+    Large list (all valid vertices) → available settlement placement spots
+    Small list (existing settlement vertices) → available city upgrade spots
+  payload: list of vertex IDs
+
+  Bot uses type 30 only during initial placement (vp <= 1).
+  For regular settlements and cities, the bot uses its own validity logic.
+
+--------------------------------------------------------------------------------
+TYPE 31 — Available Road Placement Edges
+--------------------------------------------------------------------------------
+  payload: list of edge IDs where a road can be placed.
+  Used during initial placement phase after placing first/second settlement.
+
+--------------------------------------------------------------------------------
+TYPE 33 — Available Robber Placement Hexes
+--------------------------------------------------------------------------------
+  Sent after rolling a 7 or playing a knight dev card.
+  payload: list of hex IDs (0–18) where the robber can be placed.
+           confirmed as hex IDs, NOT vertex IDs.
+
+--------------------------------------------------------------------------------
+TYPE 43 — Resource Exchange
+--------------------------------------------------------------------------------
+  Fired for player trades, bank trades, and building purchases (player→bank).
+  Fields: givingPlayer, givingCards, receivingPlayer (0=bank), receivingCards
+
+--------------------------------------------------------------------------------
+TYPE 78 — Unknown (post-initialization)
+--------------------------------------------------------------------------------
+  "isActive": true/false
+  "hasUsedDisableRequest": true/false
+  Purpose unknown. Ignored by bot.
+
+--------------------------------------------------------------------------------
+TYPE 91 — Incremental Game State Update (most common message)
+--------------------------------------------------------------------------------
+  payload.diff contains only changed fields:
+
+  diceState:
+    diceThrown: true/false     NOT used by bot — use turnState instead
+
+  mapState:
+    tileCornerStates:
+      "<vertex_id>": { "owner": <color>, "buildingType": 1=settlement 2=city }
+    tileEdgeStates:
+      "<edge_id>": { "owner": <color>, "type": 1 }
+
+  playerStates:
+    "<color>": {
+      "victoryPointsState": { "0": <new_vp_total> }
+      "resourceCards": {
+        "cards": [<card_id>, ...]   # full hand; all 0s if not our player
+      }
+    }
+
+  mechanicDevelopmentCardsState:
+    bankDevelopmentCards.cards: [10, 10, ...]   # 10 = hidden/generic card
+    players:
+      "<color>": {
+        "developmentCards.cards": [10, ...]     # real values for us, 10 for others
+        "developmentCardsUsed": [11, ...]
+        "hasUsedDevelopmentCardThisTurn": true/false
+      }
+
+  mechanicRobberState:
+    locationTileIndex: <hex_id>    hex where robber was moved
+
+  currentState:
+    completedTurns: <int>
+    currentTurnPlayerColor: <color>
+    turnState: 1=need to roll dice, 2=rolled (can build/trade/end turn)
+    actionState:                   NOT used by bot — use turnState instead
+      0  = need to roll dice
+      1  = placing initial settlement
+      3  = placing initial road
+      24 = another player is placing robber after rolling 7
+    startTime: <ms epoch>
+    allocatedTime: <ms>            e.g. 18000 = 18 seconds
+
+  tradeState:
+    activeOffers:
+      "<offer_id>": { ... }        non-null = new or updated active offer
+      "<offer_id>": null           null = offer was closed or cancelled
+    closedOffers:                  IGNORE — use null in activeOffers instead
+
+    Active offer structure:
+      id, creator: <color>
+      offeredResources: [<card_id>, ...]
+      wantedResources: [<card_id>, ...]
+      playerResponses:
+        "<color>": 0=accept 1=decline   (key absent = not yet responded)
+      counterOfferInResponseToTradeId: null or "<offer_id>"
+      playersCreatingCounterOffer: { "<color>": true/false }
 
 
-WS OUT (sequence always contains incrementing out_sequence):
-    Action 0 (Send chat message)
-        payload: message string
-    Action 2 (Dice Roll)
-        payload: true
-    Action 3 (Place Robber)
-        payload: tile #
-    Action 6 (End Turn)
-        payload: True
-    Action 7 (Confirm Discard selected)
-        Payload: cards being discarded
-    Action 8 (Update discard list)
-        payload: card #s for discarded (1, 1, 1) = 3 lumber
-    Action 9 (Buy dev card)
-        payload: true
-    Action 10 (highlight road select at bottom is valid) kinda useless, can just build road directly on map with action 11?
-        payload:true
-    Action 11 (Place Road after initial settlement)
-        payload: single number, represetnting the edge? (ex: 71)
-    Action 12 (Build Road)
-        payload: edge road was built
-    Action 14 (highlight settlement at bottom - useless)
-        payload:true
-    Action 15 (Place Initial Settlement)
-        payload: vertex # (ex: 48)
-    Action 16 (build settlement)
-        payload: vertex # of settlement
-    Action 17 (click on buy city at bottom)
-        payload: true
-    Action 18 (confirm build city)
-        payload: city vertex
-    Action 19 (build city)
-        payload: settlement vertex
-    Action 21 (occurs right after road building dev card action 11)
-        payload: edge you built road
-    Action 47 (writing trade or counteroffer) / cancel highlighted option / cancel dev (don't have to cancel, can just take other action directly)
-        payload: true
-    Action 48 (confirm dev card that I highlighted)
-        payload: 12 for vp (idk why), 11 for robber, 14 for road building
-    Action 49 (send trade/counteroffer)
-        see json for details
-        CounterOfferInResponseToTradeId: null if not a counteroffer
-    Action 50 (respond to trade)
-        id: trade id when came in
-        response: number (0 = accept, 1 = decline, 2 = creating counter offer, 3 = canceled counter offer?)
-    Action 51 (finalize trade after enemy agrees)
-        see json
-    Action 53 (highlight a dev card at bottom)
-        payload: 48 (48 for all of them idk why)
-    Action 54 (Pause Game)
-        payload:true
-    Action 64 (win game? end game?)
-        payload: true
-    Action 66 [USELESS] (hover/select to place a road or settlement off initial settlement) - first placement is sequence = 2
-        payload: single number, represetnting the edge or vertex (ex: 71) or null if canceling
-        immediately sends null ws_out to cancel self and then does action 15 or 11 after confirmation
-    Action 67 (sends an error message when switching between manual and ws inputs)
-        payload: bug id
+================================================================================
+  WS OUT ACTIONS
+================================================================================
+All messages include an incrementing out_sequence.
+
+  Action 0   Send chat message
+               payload: message string
+
+  Action 2   Roll Dice
+               payload: true
+
+  Action 3   Place Robber
+               payload: hex id (0–18)
+
+  Action 5   Steal From Player (response to type 29)
+               payload: player color to steal from (e.g. 2)
+
+  Action 6   End Turn
+               payload: true
+
+  Action 7   Confirm Discard
+               payload: list of card IDs to discard, e.g. [1, 3, 5, 5]
+               send once with the full discard list
+
+  Action 8   Update Discard Selection  [NOT USED]
+               payload: card IDs to add to selection
+               not needed — action 7 alone handles the full discard
+
+  Action 9   Buy Dev Card
+               payload: true
+
+  Action 10  Highlight Road Button  [USELESS]
+               payload: true
+
+  Action 11  Place Initial Road (after first/second settlement)
+               payload: edge id (e.g. 71)
+
+  Action 12  Build Road
+               payload: edge id
+
+  Action 14  Highlight Settlement Button  [USELESS]
+               payload: true
+
+  Action 15  Place Initial Settlement
+               payload: vertex id (e.g. 48)
+
+  Action 16  Build Settlement
+               payload: vertex id
+
+  Action 17  Click Buy City Button
+               payload: true
+
+  Action 18  Confirm City Upgrade
+               payload: vertex id of settlement to upgrade
+
+  Action 19  Build City
+               payload: vertex id of settlement to upgrade
+               UNVERIFIED: unclear if actions 17 and/or 18 must precede 19
+
+  Action 21  Second Road (road-building dev card)
+               payload: edge id
+
+  Action 47  Write Trade / Counteroffer / Cancel Highlighted Option
+               payload: true
+
+  Action 48  Confirm Highlighted Dev Card
+               payload: 12=VP card, 11=knight/robber, 14=road building
+
+  Action 49  Send Trade Offer or Counteroffer
+               See action49.json for payload structure.
+               counterOfferInResponseToTradeId: null if not a counteroffer
+
+  Action 50  Respond to Trade Offer
+               payload: { "id": "<offer_id>", "response": <number> }
+               response: 0=accept, 1=decline, 2=creating counter, 3=cancel counter
+
+  Action 51  Finalize Trade (after other player accepts)
+               See action51.json for payload structure.
+
+  Action 53  Highlight Dev Card in Hand
+               payload: 48 (same value for all card types)
+
+  Action 54  Pause Game
+               payload: true
+
+  Action 64  End Game Signal
+               payload: true
+
+  Action 66  Hover to Place Road/Settlement  [USELESS]
+               payload: edge or vertex id, or null to cancel
+
+  Action 67  Error Message (input mode switch)
+               payload: bug id
