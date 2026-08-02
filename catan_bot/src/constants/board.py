@@ -15,6 +15,16 @@ RSC_IDS = {
     'ore': 5,
 }
 
+# portEdgeStates[i]['type'] -> (resource_id or None for generic, trade ratio)
+PORT_TYPES = {
+    1: (None, 3),  # generic 3:1
+    2: (1, 2),     # lumber 2:1
+    3: (2, 2),     # brick 2:1
+    4: (3, 2),     # wool 2:1
+    5: (4, 2),     # grain 2:1
+    6: (5, 2),     # ore 2:1
+}
+
 DICE_VALUE = {
     2:  1,
     3:  2,

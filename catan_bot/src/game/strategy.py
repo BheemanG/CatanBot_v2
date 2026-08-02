@@ -34,6 +34,24 @@ def score_hex(h):
 def score_vertex(v_id, state):
     return sum(score_hex(state.hexes[h_id]) for h_id in VERTEX_TO_HEXES[v_id])
 
+def port_value(v_id, state, weights=None):
+    """Strategic value of settling on a port vertex. A specific 2:1 port is worth roughly
+    an extra hex of that resource (scaled by archetype weight when known); a generic 3:1
+    port gets a flat, smaller bonus since it helps whatever we're surplus in."""
+    port = state.ports.get(v_id)
+    if not port:
+        return 0
+    if port['resource'] is None:
+        return 1.5
+    w = weights.get(port['resource'], 1.0) if weights else 1.0
+    return 2.5 * w
+
+def score_vertex_buildable(v_id, state):
+    """score_vertex plus port bonus — used when choosing WHERE to place a new settlement
+    or road, since gaining port access is a strategic win on top of hex income. Not used
+    for city-upgrade comparisons, where the port (if any) is already secured."""
+    return score_vertex(v_id, state) + port_value(v_id, state)
+
 def can_afford(player, costs):
     return all(player.resources.get(rsc, 0) >= amt for rsc, amt in costs.items())
 
@@ -112,13 +130,43 @@ def best_road(road_spots, state):
         if not reachable:
             return -1
         # discount by hop count so a nearby decent vertex beats a tied/better one that's farther away
-        return max(score_vertex(v, state) / (1 + dist) for v, dist in reachable.items())
+        return max(score_vertex_buildable(v, state) / (1 + dist) for v, dist in reachable.items())
     return max(road_spots, key=road_score)
 
+# Ore-Wheat-Sheep: favours ore/grain heavily (city + dev card engine), sheep moderately.
+OWS_WEIGHTS = {5: 1.5, 4: 1.4, 3: 1.1, 1: 0.7, 2: 0.7}
+# Lumber-Brick: favours lumber/brick heavily (cheap settlements + roads to rush expansion).
+LB_WEIGHTS  = {1: 1.5, 2: 1.5, 3: 1.0, 4: 0.8, 5: 0.6}
+ARCHETYPE_WEIGHTS = {'ows': OWS_WEIGHTS, 'lb': LB_WEIGHTS}
+
+def score_vertex_weighted(v_id, state, weights):
+    score = 0
+    for h_id in VERTEX_TO_HEXES[v_id]:
+        h = state.hexes[h_id]
+        if not h or not h.resource or h.resource == 0:
+            continue
+        score += DICE_VALUE.get(h.dice, 0) * weights.get(h.resource, 1.0)
+    score += port_value(v_id, state, weights)
+    return score
+
 def score_vertex_initial(v_id, state):
-    """Pip total + bonus pips for each resource type not yet in our portfolio.
-    Doubles the contribution of hexes that add a new unique resource, rewarding
-    both raw productivity and diversity between the two starting settlements."""
+    """First settlement: score under both the Ore-Wheat-Sheep and Lumber-Brick archetypes
+    and take whichever the board rewards more — lets the opening go wherever the hexes
+    actually support. Second settlement: score under the archetype the first settlement
+    committed us to (state.build_archetype), plus a smaller bonus for resource types
+    the first settlement didn't cover, so we still hedge a little instead of going
+    all-in on one archetype."""
+    have_settlement = any(owner == state.my_color for owner in state.vertices)
+
+    if not have_settlement:
+        return max(
+            score_vertex_weighted(v_id, state, OWS_WEIGHTS),
+            score_vertex_weighted(v_id, state, LB_WEIGHTS),
+        )
+
+    weights = ARCHETYPE_WEIGHTS.get(state.build_archetype, OWS_WEIGHTS)
+    score = score_vertex_weighted(v_id, state, weights)
+
     covered = set()
     for v, owner in enumerate(state.vertices):
         if owner == state.my_color:
@@ -127,20 +175,22 @@ def score_vertex_initial(v_id, state):
                 if h and h.resource and h.resource != 0:
                     covered.add(h.resource)
     seen = set()
-    score = 0
     for h_id in VERTEX_TO_HEXES[v_id]:
         h = state.hexes[h_id]
         if not h or not h.resource or h.resource == 0:
             continue
-        pip = DICE_VALUE.get(h.dice, 0)
-        score += pip
         if h.resource not in covered and h.resource not in seen:
-            score += pip  # double-count first occurrence of each new resource type
+            score += DICE_VALUE.get(h.dice, 0) * 0.5  # smaller nudge than the archetype weighting
             seen.add(h.resource)
     return score
 
 def calculate_placement_settlement(state, msg_payload):
+    is_first = not any(owner == state.my_color for owner in state.vertices)
     vertex = max(msg_payload, key=lambda v_id: score_vertex_initial(v_id, state))
+    if is_first:
+        ows = score_vertex_weighted(vertex, state, OWS_WEIGHTS)
+        lb = score_vertex_weighted(vertex, state, LB_WEIGHTS)
+        state.build_archetype = 'ows' if ows >= lb else 'lb'
     state.vertices[vertex] = state.my_color
     return vertex
 
@@ -229,8 +279,9 @@ def choose_year_of_plenty(state):
 def try_bank_trade(state):
     player = state.my_player()
     res = player.resources
+    ratios = state.port_ratios()
 
-    give_pool = [r for r in range(1, 6) if res.get(r, 0) >= 4]
+    give_pool = [r for r in range(1, 6) if res.get(r, 0) >= ratios[r]]
     if not give_pool:
         return None
 
@@ -268,7 +319,9 @@ def try_bank_trade(state):
         want_candidates = sorted(range(1, 6), key=lambda r: res.get(r, 0))
 
     want = max(want_candidates, key=lambda r: resource_need_score(r, income, state))
-    give = max(give_pool, key=lambda r: res.get(r, 0))
+    # prefer the resource with the most trades' worth of surplus once its port ratio is
+    # accounted for — a modest stack behind a 2:1 port can outrank a bigger 4:1 stack
+    give = max(give_pool, key=lambda r: (res.get(r, 0) // ratios[r], res.get(r, 0)))
 
     if give == want:
         return None
@@ -279,7 +332,7 @@ def try_bank_trade(state):
             "creator": state.my_color,
             "isBankTrade": True,
             "counterOfferInResponseToTradeId": None,
-            "offeredResources": [give] * 4,
+            "offeredResources": [give] * ratios[give],
             "wantedResources": [want],
         },
         "sequence": state.next_sequence(),
@@ -290,7 +343,7 @@ def decide_turn(state):
 
     settlement_spots = valid_settlement_spots(state)
     if settlement_spots and can_afford(player, SETTLEMENT_COST):
-        best = max(settlement_spots, key=lambda v: score_vertex(v, state))
+        best = max(settlement_spots, key=lambda v: score_vertex_buildable(v, state))
         return {"action": Action.BUILD_SETTLEMENT, "payload": best, "sequence": state.next_sequence()}
 
     city_spots = valid_city_spots(state)

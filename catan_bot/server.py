@@ -87,6 +87,8 @@ def handle_state():
         'players':      players_out,
         'robber_hex':   state.robber_hex,
         'vertices':     [v for v in state.vertices],
+        'ports':        state.ports,
+        'my_port_ratios': state.port_ratios(),
     })
 
 @app.route('/outgoing', methods=['POST'])

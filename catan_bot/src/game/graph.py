@@ -10,11 +10,17 @@ def _load(filename):
         raw = json.load(f)
     return {int(k): {int(k2): v2 for k2, v2 in v.items()} for k, v in raw.items()}
 
+def _load_port_to_vertex(filename):
+    with open(GRAPH_DATA_DIR / filename) as f:
+        raw = json.load(f)
+    return {int(k): v for k, v in raw.items()}
+
 # ─── loaded data ──────────────────────────────────────────────────────────────
 
 vertex_distances   = _load('vertex_distances.json')
 vertex_to_vertices = _load('vertex_to_vertices.json')
 vertex_to_edges    = _load('vertex_to_edges.json')
+port_to_vertex     = _load_port_to_vertex('port_to_vertex.json')  # port index (0-8, fixed every game) -> [v1, v2]
 
 # ─── queries ──────────────────────────────────────────────────────────────────
 

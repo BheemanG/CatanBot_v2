@@ -52,8 +52,31 @@ Sent on connect / reconnect. Contains the same fields as Type 91 diffs at the to
 | `payload.gameState.mapState.tileHexStates` | Hex resource types + dice numbers |
 | `payload.gameState.mapState.tileCornerStates` | Placed settlements / cities |
 | `payload.gameState.mapState.tileEdgeStates` | Placed roads |
+| `payload.gameState.mapState.portEdgeStates` | Port locations + trade ratios (see below) |
 | `payload.currentState` | `turnState`, `currentTurnPlayerColor` |
 | `payload.tradeState.activeOffers` | Active trade offers |
+
+#### `portEdgeStates`
+Only present in Type 4 (ports never change mid-game, so Type 91 diffs never touch this).
+```json
+{
+  "0": { "x": 0, "y": -2, "z": 0, "type": 6 },
+  "1": { "x": -2, "y": 2, "z": 2, "type": 1 }
+}
+```
+- Keyed `"0"`–`"8"`, one entry per port. `x`/`y`/`z` are cube hex coordinates for the port's edge (unused by the bot — see below for the vertex mapping instead).
+- `type` — trade ratio / resource:
+
+| `type` | Meaning |
+|--------|---------|
+| `1` | Generic 3:1 |
+| `2` | Lumber 2:1 |
+| `3` | Brick 2:1 |
+| `4` | Wool 2:1 |
+| `5` | Grain 2:1 |
+| `6` | Ore 2:1 |
+
+- Port **index** (`"0"`–`"8"`) → vertex pair is fixed across every game (only `type` is randomized per game), hand-mapped in `catan_bot/data/graph_data/port_to_vertex.json`. `GameState.parse_board` uses that file to build `state.ports: {vertex_id: {"resource": rsc_id_or_None, "ratio": 2_or_3}}` (`resource=None` for generic 3:1 ports).
 
 ---
 
@@ -62,9 +85,11 @@ Boolean payload. Purpose unknown. Ignored by bot.
 
 ---
 
-### Type 18 — Monopoly Resource Selection
-Sent after playing a monopoly dev card (action 48 payload `13`).
+### Type 18 — Card Selection Prompt *(dual purpose)*
+Sent after playing a Monopoly or Year of Plenty dev card. Distinguish by `developmentCardUsed`
+(`13` = monopoly, `15` = year of plenty) or by `selectCardFormat.amountOfCardsToSelect` (`1` vs `2`).
 
+**Monopoly** (action 48 payload `13`):
 ```json
 {
   "developmentCardUsed": 13,
@@ -74,10 +99,22 @@ Sent after playing a monopoly dev card (action 48 payload `13`).
   }
 }
 ```
-
 - `validCardsToSelect` — always all 5 resource types
 - Bot responds with **Action 7**, payload = single-element array of chosen resource, e.g. `[4]`
 - Same action as discard but single element; game distinguishes by context
+
+**Year of Plenty** (action 48 payload `15`):
+```json
+{
+  "developmentCardUsed": 15,
+  "selectCardFormat": {
+    "amountOfCardsToSelect": 2,
+    "validCardsToSelect": [1, 2, 3, 4, 5]
+  }
+}
+```
+- Bot responds with **Action 7**, payload = 2-element array of chosen resources, e.g. `[4, 5]` (duplicates allowed — takes 2 of the same resource from the bank)
+- No opponent component (unlike Monopoly) — picks purely by unmet build need
 
 ---
 
@@ -108,7 +145,7 @@ Shows who received a resource and why.
 ---
 
 ### Type 29 — Choose Player to Steal From
-Sent after placing the robber on a hex with multiple opponents.
+Sent after placing the robber on a hex with multiple opponents (post dice-roll-7 flow).
 
 ```json
 {
@@ -117,9 +154,29 @@ Sent after placing the robber on a hex with multiple opponents.
 }
 ```
 
-- `playersToSelect` — list of player colors that can be stolen from
+- `playersToSelect` — list of player colors that can be stolen from, top-level
 - `isPirate` — `false` for land robber, `true` for pirate (Seafarers)
 - Bot responds with **Action 5**, payload = chosen player color
+
+---
+
+### Type 20 — Choose Player to Steal From (Knight)
+Same steal-selection prompt as Type 29, but sent after playing a Knight dev card pre-roll
+(action 48 payload `11`) instead of after a dice-roll 7. See `type20.json`.
+
+```json
+{
+  "developmentCardUsed": 11,
+  "selectPlayerFormat": {
+    "playersToSelect": [3, 2],
+    "isPirate": false
+  }
+}
+```
+
+- `playersToSelect` — nested under `selectPlayerFormat`, unlike Type 29's top-level field
+- `developmentCardUsed` — `11` confirms this is the Knight-triggered prompt
+- Bot responds with **Action 5**, payload = chosen player color (same as Type 29)
 
 ---
 
@@ -333,7 +390,10 @@ VP cards are counted automatically in `victoryPointsState`. No action 48 require
 2. Type 18 arrives → bot responds with action 7 `payload: [chosen_resource]`
 3. Bot picks resource that maximises `opponent_total_of_that_resource × need_score`
 
-**Year of Plenty** — not yet implemented.
+**Year of Plenty (payload `15`)** — play during turn:
+1. Send action 48 `payload: 15`
+2. Type 18 arrives with `developmentCardUsed: 15`, `amountOfCardsToSelect: 2` → bot responds with action 7 `payload: [r1, r2]`
+3. Bot picks the 2 resources with the highest unmet-build-need score (duplicates allowed if one resource is needed twice)
 
 ### Dev Card IDs (in `developmentCards.cards`)
 | ID | Card |
@@ -343,7 +403,7 @@ VP cards are counted automatically in `victoryPointsState`. No action 48 require
 | 12 | VP card |
 | 13 | Monopoly |
 | 14 | Road building |
-| ?  | Year of plenty |
+| 15 | Year of plenty |
 
 ### Action 50 — Respond to Trade
 | Response | Meaning |

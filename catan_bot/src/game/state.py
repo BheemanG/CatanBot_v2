@@ -1,4 +1,5 @@
-from src.constants.board import VERTEX_TO_HEXES
+from src.constants.board import VERTEX_TO_HEXES, PORT_TYPES
+from src.game.graph import port_to_vertex
 
 class Hex:
     def __init__(self, hex_id, resource, dice):
@@ -48,6 +49,7 @@ class GameState:
         self.turn_state   = None
         self.edges        = [None] * 72
         self.robber_hex       = None
+        self.ports            = {}    # vertex_id -> {"resource": rsc_id or None, "ratio": 2 or 3}
         self.active_offers    = {}    # trade_id -> offer dict
         self.responded_offers = set() # offer IDs we've already sent action 50 for
         self.needs_roll       = False # True after turnState=1 transition; cleared on roll
@@ -55,6 +57,7 @@ class GameState:
         self.robber_pending   = False # True after type 33 handled; cleared after steal or if no opponents adjacent
         self.road_building_pending = 0 # roads left to place from an active Road Building dev card
         self.turn_start_dev_cards = [] # snapshot of dev_cards owned as of the start of our current turn (playable set)
+        self.build_archetype  = None  # 'ows' or 'lb' — set once our first settlement is placed
         self.out_sequence     = 1
         self.players = {0: self._make_bank()}
     
@@ -65,6 +68,27 @@ class GameState:
 
     def my_player(self):
         return self.players.get(self.my_color)
+
+    def port_ratios(self):
+        """Best trade ratio per resource (1-5) reachable from our settlements/cities.
+        Defaults to 4 (no port) when we hold no matching or generic port."""
+        ratios = {r: 4 for r in range(1, 6)}
+        player = self.my_player()
+        if not player:
+            return ratios
+        my_vertices = set(player.settlements) | set(player.cities)
+        generic_ratio = min(
+            (p['ratio'] for v, p in self.ports.items() if v in my_vertices and p['resource'] is None),
+            default=None,
+        )
+        for r in range(1, 6):
+            specific_ratio = min(
+                (p['ratio'] for v, p in self.ports.items() if v in my_vertices and p['resource'] == r),
+                default=None,
+            )
+            best = min(x for x in (specific_ratio, generic_ratio, 4) if x is not None)
+            ratios[r] = best
+        return ratios
 
     def next_sequence(self):
         self.out_sequence += 1
@@ -77,6 +101,7 @@ class GameState:
         self.edges        = [None] * 72
         self.current_turn = None
         self.turn_state   = None
+        self.ports             = {}
         self.active_offers    = {}
         self.responded_offers = set()
         self.needs_roll       = False
@@ -84,6 +109,7 @@ class GameState:
         self.robber_pending   = False
         self.road_building_pending = 0
         self.turn_start_dev_cards = []
+        self.build_archetype  = None
         self.out_sequence     = 1
 
         self.players = {0: self._make_bank()}
@@ -102,6 +128,11 @@ class GameState:
         self.robber_hex = next(
             int(hid) for hid, h in tiles.items() if h.get('type') == 0
         )
+
+        for port_id, port_data in map_state.get('portEdgeStates', {}).items():
+            resource, ratio = PORT_TYPES[port_data['type']]
+            for v_id in port_to_vertex[int(port_id)]:
+                self.ports[v_id] = {'resource': resource, 'ratio': ratio}
 
         for v_id, v_data in map_state.get('tileCornerStates', {}).items():
             v_id = int(v_id)
