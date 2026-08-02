@@ -303,9 +303,9 @@ def decide(msg_type, msg_payload, state):
         }
 
     elif msg_type == MsgType.CHOOSE_PLAYER_TO_ROB and msg_payload:
+        state.robber_pending = False
         candidates = msg_payload.get('playersToSelect', [])
         target = max(candidates, key=lambda c: sum(state.players[c].resources.values()))
-        time.sleep(0.5)
         return {"action": Action.STEAL_FROM_PLAYER, "payload": target, "sequence": state.next_sequence()}
 
     elif msg_type == MsgType.MONOPOLY_PROMPT:
@@ -337,6 +337,7 @@ def decide(msg_type, msg_payload, state):
         return {"action": Action.CONFIRM_DISCARD, "payload": to_discard, "sequence": state.next_sequence()}
 
     elif msg_type == MsgType.AVAILABLE_ROBBER_PLACEMENTS and msg_payload:
+        state.robber_pending = True
         time.sleep(1.0)
         best = max(msg_payload, key=lambda h: score_robber_hex(h, state))
         return {
@@ -360,6 +361,15 @@ def decide(msg_type, msg_payload, state):
         current_diff = diff.get('currentState', {})
         state.update(diff)
 
+        # robber was moved: if no opponents are adjacent to new hex, steal sequence is done
+        if 'mechanicRobberState' in diff and state.robber_pending:
+            hex_verts = HEX_TO_VERTICES.get(state.robber_hex, [])
+            if not any(
+                state.vertices[v] is not None and state.vertices[v] != state.my_color
+                for v in hex_verts
+            ):
+                state.robber_pending = False
+
         # turnState=1 transition on our turn — set flag and optionally play knight first
         if (
             current_diff.get('turnState') == 1
@@ -372,8 +382,8 @@ def decide(msg_type, msg_payload, state):
                 time.sleep(1.0)
                 return {"action": Action.CONFIRM_DEV_CARD, "payload": 11, "sequence": state.next_sequence()}
 
-        # roll when flagged — fires after knight+robber interruption resolves
-        if state.needs_roll and state.current_turn == state.my_color and state.turn_state == 1:
+        # roll when flagged and steal sequence is not pending
+        if state.needs_roll and state.current_turn == state.my_color and state.turn_state == 1 and not state.robber_pending:
             state.needs_roll = False
             time.sleep(1.5)
             return {"action": Action.ROLL_DICE, "payload": True, "sequence": state.next_sequence()}
@@ -393,7 +403,7 @@ def decide(msg_type, msg_payload, state):
                     "sequence": state.next_sequence()
                 }
 
-        if state.current_turn == state.my_color and state.turn_state == 2:
+        if state.current_turn == state.my_color and state.turn_state == 2 and not state.robber_pending:
             time.sleep(1.0)
             return decide_turn(state)
 

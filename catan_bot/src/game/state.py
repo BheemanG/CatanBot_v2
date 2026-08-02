@@ -52,6 +52,7 @@ class GameState:
         self.responded_offers = set() # offer IDs we've already sent action 50 for
         self.needs_roll       = False # True after turnState=1 transition; cleared on roll
         self.dev_card_played  = False # True after playing a dev card this turn
+        self.robber_pending   = False # True after type 33 handled; cleared after steal or if no opponents adjacent
         self.out_sequence     = 1
         self.players = {0: self._make_bank()}
     
@@ -78,6 +79,7 @@ class GameState:
         self.responded_offers = set()
         self.needs_roll       = False
         self.dev_card_played  = False
+        self.robber_pending   = False
         self.out_sequence     = 1
 
         self.players = {0: self._make_bank()}
