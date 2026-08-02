@@ -1,0 +1,16 @@
+{
+  "id": "130",
+  "data": {
+    "type": 29,
+    "payload": {
+      "cancelButtonActive": false,
+      "playersToSelect": [
+        3,
+        2
+      ],
+      "allowableActionState": 27,
+      "isPirate": false
+    },
+    "sequence": 57
+  }
+}

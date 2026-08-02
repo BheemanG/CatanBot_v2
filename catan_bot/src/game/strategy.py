@@ -174,6 +174,12 @@ def decide(msg_type, msg_payload, state):
             "sequence": state.next_sequence()
         }
 
+    elif msg_type == MsgType.CHOOSE_PLAYER_TO_ROB and msg_payload:
+        candidates = msg_payload.get('playersToSelect', [])
+        target = max(candidates, key=lambda c: sum(state.players[c].resources.values()))
+        time.sleep(0.5)
+        return {"action": Action.STEAL_FROM_PLAYER, "payload": target, "sequence": state.next_sequence()}
+
     elif msg_type == MsgType.DISCARD:
         card_format = msg_payload.get('selectCardFormat', {})
         hand = card_format.get('validCardsToSelect', [])
@@ -207,10 +213,15 @@ def decide(msg_type, msg_payload, state):
         state.players[receiving_player].lose_resources(receiving_cards)
         return
     elif msg_type == MsgType.GAME_STATE_UPDATE:
-        state.update(msg_payload.get('diff'))
-        if state.current_turn == state.my_color and state.turn_state == 1:
+        diff = msg_payload.get('diff', {})
+        current_diff = diff.get('currentState', {})
+        state.update(diff)
+        # only roll if this diff explicitly set turnState=1 (transition event, not repeated state)
+        if (
+            current_diff.get('turnState') == 1
+            and current_diff.get('currentTurnPlayerColor') == state.my_color
+        ):
             time.sleep(1.5)
-            #consider using a dev card before rolling the dice
             return {
                 "action": Action.ROLL_DICE,
                 "payload": True,
