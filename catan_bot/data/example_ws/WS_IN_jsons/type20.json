@@ -1,0 +1,22 @@
+{
+  "id": "130",
+  "data": {
+    "type": 20,
+    "payload": {
+      "developmentCardUsed": 11,
+      "selectPlayerFormat": {
+        "cancelButtonActive": false,
+        "playersToSelect": [
+          3,
+          2
+        ],
+        "allowableActionState": 27,
+        "isPirate": false
+      },
+      "overrideText": {
+        "key": "strings:game.prompts.selectWhoToRobFrom"
+      }
+    },
+    "sequence": 474
+  }
+}

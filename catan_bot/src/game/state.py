@@ -53,6 +53,8 @@ class GameState:
         self.needs_roll       = False # True after turnState=1 transition; cleared on roll
         self.dev_card_played  = False # True after playing a dev card this turn
         self.robber_pending   = False # True after type 33 handled; cleared after steal or if no opponents adjacent
+        self.road_building_pending = 0 # roads left to place from an active Road Building dev card
+        self.turn_start_dev_cards = [] # snapshot of dev_cards owned as of the start of our current turn (playable set)
         self.out_sequence     = 1
         self.players = {0: self._make_bank()}
     
@@ -80,6 +82,8 @@ class GameState:
         self.needs_roll       = False
         self.dev_card_played  = False
         self.robber_pending   = False
+        self.road_building_pending = 0
+        self.turn_start_dev_cards = []
         self.out_sequence     = 1
 
         self.players = {0: self._make_bank()}
@@ -189,6 +193,7 @@ class GameState:
                 # turn changed — reset per-turn flags
                 self.needs_roll      = False
                 self.dev_card_played = False
+                self.road_building_pending = 0
             self.current_turn = current['currentTurnPlayerColor']
         if 'turnState' in current:
             self.turn_state = current['turnState']

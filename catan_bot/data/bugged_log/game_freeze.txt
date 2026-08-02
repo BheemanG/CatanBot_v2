@@ -1,0 +1,362 @@
+[WS OUT] {
+  "action": 2,
+  "payload": true,
+  "sequence": 49
+}
+userscript.html?name=Catan-Bot.user.js&id=9ebc8ccd-9fc3-4e30-98e4-5f573e1d0233:59 [WS IN] {
+  "id": "130",
+  "data": {
+    "type": 13,
+    "payload": {
+      "title": {
+        "key": "strings:game.prompts.discardCards"
+      },
+      "body": {
+        "key": "strings:game.prompts.youHaveMoreThanXCards",
+        "options": {
+          "count": 7,
+          "amountToDiscard": 4
+        }
+      },
+      "showCondensedCardInformation": false,
+      "selectCardFormat": {
+        "cancelButtonActive": false,
+        "allowableActionState": 28,
+        "amountOfCardsToSelect": 4,
+        "validCardsToSelect": [
+          1,
+          1,
+          1,
+          5,
+          2,
+          5,
+          3,
+          4,
+          4
+        ],
+        "showCardBadge": true
+      }
+    },
+    "sequence": 293
+  }
+}
+userscript.html?name=Catan-Bot.user.js&id=9ebc8ccd-9fc3-4e30-98e4-5f573e1d0233:59 [WS IN] {
+  "id": "130",
+  "data": {
+    "type": 91,
+    "payload": {
+      "diff": {
+        "diceState": {
+          "diceThrown": true,
+          "dice1": 5,
+          "dice2": 2
+        },
+        "currentState": {
+          "actionState": 28,
+          "startTime": 1785689921631,
+          "allocatedTime": 3000
+        },
+        "playerStates": {
+          "1": {
+            "isTakingAction": true
+          }
+        },
+        "gameLogState": {
+          "171": {
+            "text": {
+              "type": 10,
+              "playerColor": 1,
+              "firstDice": 5,
+              "secondDice": 2
+            },
+            "from": 1
+          }
+        }
+      },
+      "timeLeftInState": 3000
+    },
+    "sequence": 294
+  }
+}
+userscript.html?name=Catan-Bot.user.js&id=9ebc8ccd-9fc3-4e30-98e4-5f573e1d0233:96 [WS OUT] {
+  "action": 7,
+  "payload": [
+    1,
+    1,
+    1,
+    4
+  ],
+  "sequence": 50
+}
+userscript.html?name=Catan-Bot.user.js&id=9ebc8ccd-9fc3-4e30-98e4-5f573e1d0233:59 [WS IN] {
+  "id": "130",
+  "data": {
+    "type": 43,
+    "payload": {
+      "givingPlayer": 1,
+      "givingCards": [
+        1,
+        1,
+        1,
+        4
+      ],
+      "receivingPlayer": 0,
+      "receivingCards": []
+    },
+    "sequence": 295
+  }
+}
+userscript.html?name=Catan-Bot.user.js&id=9ebc8ccd-9fc3-4e30-98e4-5f573e1d0233:59 [WS IN] {
+  "id": "130",
+  "data": {
+    "type": 27,
+    "payload": null,
+    "sequence": 296
+  }
+}
+userscript.html?name=Catan-Bot.user.js&id=9ebc8ccd-9fc3-4e30-98e4-5f573e1d0233:59 [WS IN] {
+  "id": "130",
+  "data": {
+    "type": 30,
+    "payload": [],
+    "sequence": 297
+  }
+}
+userscript.html?name=Catan-Bot.user.js&id=9ebc8ccd-9fc3-4e30-98e4-5f573e1d0233:59 [WS IN] {
+  "id": "130",
+  "data": {
+    "type": 33,
+    "payload": [],
+    "sequence": 298
+  }
+}
+userscript.html?name=Catan-Bot.user.js&id=9ebc8ccd-9fc3-4e30-98e4-5f573e1d0233:59 [WS IN] {
+  "id": "130",
+  "data": {
+    "type": 31,
+    "payload": [],
+    "sequence": 299
+  }
+}
+userscript.html?name=Catan-Bot.user.js&id=9ebc8ccd-9fc3-4e30-98e4-5f573e1d0233:59 [WS IN] {
+  "id": "130",
+  "data": {
+    "type": 32,
+    "payload": [],
+    "sequence": 300
+  }
+}
+userscript.html?name=Catan-Bot.user.js&id=9ebc8ccd-9fc3-4e30-98e4-5f573e1d0233:59 [WS IN] {
+  "id": "130",
+  "data": {
+    "type": 30,
+    "payload": [],
+    "sequence": 301
+  }
+}
+userscript.html?name=Catan-Bot.user.js&id=9ebc8ccd-9fc3-4e30-98e4-5f573e1d0233:59 [WS IN] {
+  "id": "130",
+  "data": {
+    "type": 33,
+    "payload": [],
+    "sequence": 302
+  }
+}
+userscript.html?name=Catan-Bot.user.js&id=9ebc8ccd-9fc3-4e30-98e4-5f573e1d0233:59 [WS IN] {
+  "id": "130",
+  "data": {
+    "type": 31,
+    "payload": [],
+    "sequence": 303
+  }
+}
+userscript.html?name=Catan-Bot.user.js&id=9ebc8ccd-9fc3-4e30-98e4-5f573e1d0233:59 [WS IN] {
+  "id": "130",
+  "data": {
+    "type": 32,
+    "payload": [],
+    "sequence": 304
+  }
+}
+userscript.html?name=Catan-Bot.user.js&id=9ebc8ccd-9fc3-4e30-98e4-5f573e1d0233:59 [WS IN] {
+  "id": "130",
+  "data": {
+    "type": 33,
+    "payload": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18
+    ],
+    "sequence": 305
+  }
+}
+userscript.html?name=Catan-Bot.user.js&id=9ebc8ccd-9fc3-4e30-98e4-5f573e1d0233:59 [WS IN] {
+  "id": "130",
+  "data": {
+    "type": 91,
+    "payload": {
+      "diff": {
+        "bankState": {
+          "resourceCards": {
+            "1": 19,
+            "4": 15
+          }
+        },
+        "currentState": {
+          "actionState": 24,
+          "startTime": 1785689923104
+        },
+        "playerStates": {
+          "1": {
+            "resourceCards": {
+              "cards": [
+                5,
+                2,
+                5,
+                3,
+                4
+              ]
+            },
+            "isTakingAction": false
+          }
+        },
+        "gameLogState": {
+          "172": {
+            "text": {
+              "type": 55,
+              "playerColor": 1,
+              "cardEnums": [
+                1,
+                1,
+                1,
+                4
+              ],
+              "areResourceCards": true
+            },
+            "from": 1
+          }
+        }
+      },
+      "timeLeftInState": 3000
+    },
+    "sequence": 306
+  }
+}
+userscript.html?name=Catan-Bot.user.js&id=9ebc8ccd-9fc3-4e30-98e4-5f573e1d0233:96 [WS OUT] {
+  "action": 3,
+  "payload": 10,
+  "sequence": 51
+}
+userscript.html?name=Catan-Bot.user.js&id=9ebc8ccd-9fc3-4e30-98e4-5f573e1d0233:59 [WS IN] {
+  "id": "130",
+  "data": {
+    "type": 33,
+    "payload": [],
+    "sequence": 307
+  }
+}
+userscript.html?name=Catan-Bot.user.js&id=9ebc8ccd-9fc3-4e30-98e4-5f573e1d0233:59 [WS IN] {
+  "id": "130",
+  "data": {
+    "type": 43,
+    "payload": {
+      "givingPlayer": 2,
+      "givingCards": [
+        3
+      ],
+      "receivingPlayer": 1,
+      "receivingCards": []
+    },
+    "sequence": 308
+  }
+}
+userscript.html?name=Catan-Bot.user.js&id=9ebc8ccd-9fc3-4e30-98e4-5f573e1d0233:59 [WS IN] {
+  "id": "130",
+  "data": {
+    "type": 91,
+    "payload": {
+      "diff": {
+        "currentState": {
+          "turnState": 2,
+          "actionState": 0,
+          "startTime": 1785689926428,
+          "allocatedTime": 12000
+        },
+        "playerStates": {
+          "1": {
+            "resourceCards": {
+              "cards": [
+                5,
+                2,
+                5,
+                3,
+                4,
+                3
+              ]
+            }
+          },
+          "2": {
+            "resourceCards": {
+              "cards": [
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            }
+          }
+        },
+        "gameLogState": {
+          "173": {
+            "text": {
+              "type": 11,
+              "playerColor": 1,
+              "pieceEnum": 5,
+              "tileInfo": {
+                "tileType": 4,
+                "diceNumber": 6,
+                "resourceType": 4
+              }
+            },
+            "from": 1
+          },
+          "174": {
+            "text": {
+              "type": 14,
+              "playerColor": 2,
+              "cardEnums": [
+                3
+              ]
+            },
+            "from": 1,
+            "specificRecipients": [
+              1
+            ],
+            "toSpectators": false
+          }
+        },
+        "mechanicRobberState": {
+          "locationTileIndex": 10
+        }
+      },
+      "timeLeftInState": 12000
+    },
+    "sequence": 309
+  }
+}

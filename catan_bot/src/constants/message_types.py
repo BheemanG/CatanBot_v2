@@ -2,8 +2,9 @@ class MsgType:
     GAME_SETTINGS = 1
     INITIALIZE_MAP = 4
     UNKNOWN_6 = 6
+    CHOOSE_PLAYER_TO_ROB_KNIGHT = 20  # same prompt as 29, but triggered by playing a knight pre-roll
     DISCARD = 13
-    MONOPOLY_PROMPT = 18
+    CARD_SELECTION_PROMPT = 18  # dual purpose: monopoly (1 card) or year of plenty (2 cards)
     RESOURCE_DISTRIBUTION = 28
     CHOOSE_PLAYER_TO_ROB = 29
     AVAILABLE_SETTLEMENT_PLACEMENTS = 30
@@ -20,7 +21,7 @@ class Action:
     PLACE_ROBBER = 3
     STEAL_FROM_PLAYER = 5
     END_TURN = 6
-    CONFIRM_DISCARD = 7
+    CONFIRM_CARD_SELECTION = 7  # discard, monopoly resource, or year of plenty resources
     UPDATE_DISCARD = 8
     BUY_DEV_CARD = 9
     PLACE_INITIAL_ROAD = 11

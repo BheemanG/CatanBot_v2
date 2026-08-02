@@ -70,19 +70,23 @@ def valid_road_spots(state):
     return valid
 
 def reachable_settleable_vertices(candidate_edge, state):
+    """BFS from candidate_edge through open/our-own territory. Returns {vertex: hop_count}
+    for every settleable vertex found, so callers can discount distant vertices instead of
+    treating anything eventually reachable as equally good."""
     my_color = state.my_color
-    visited = set()
+    visited = {}
     queue = []
 
     for v in EDGE_TO_VERTICES[candidate_edge]:
         owner = state.vertices[v]
         if owner is None or owner == my_color:
-            visited.add(v)
+            visited[v] = 0
             queue.append(v)
 
     i = 0
     while i < len(queue):
         v = queue[i]; i += 1
+        dist = visited[v]
         for e in adjacent_edges(v):
             edge_owner = state.edges[e]
             if edge_owner is not None and edge_owner != my_color:
@@ -93,21 +97,22 @@ def reachable_settleable_vertices(candidate_edge, state):
                 nv_owner = state.vertices[nv]
                 if nv_owner is not None and nv_owner != my_color:
                     continue  # opponent settlement blocks traversal
-                visited.add(nv)
+                visited[nv] = dist + 1
                 queue.append(nv)
 
-    return [
-        v for v in visited
+    return {
+        v: dist for v, dist in visited.items()
         if state.vertices[v] is None
         and not any(state.vertices[n] is not None for n in neighbors(v))
-    ]
+    }
 
 def best_road(road_spots, state):
     def road_score(e):
         reachable = reachable_settleable_vertices(e, state)
         if not reachable:
             return -1
-        return max(score_vertex(v, state) for v in reachable)
+        # discount by hop count so a nearby decent vertex beats a tied/better one that's farther away
+        return max(score_vertex(v, state) / (1 + dist) for v, dist in reachable.items())
     return max(road_spots, key=road_score)
 
 def score_vertex_initial(v_id, state):
@@ -190,6 +195,37 @@ def resource_need_score(r, income, state):
     )
     return (demand + 1) / (income.get(r, 0) + 1) / (count + 1)
 
+def is_beneficial_trade(offered, wanted, state):
+    """offered = resources the creator gives us, wanted = resources they want from us.
+    Beneficial if we can actually give what's wanted and what we receive is worth more
+    to us (by resource_need_score) than what we give up."""
+    player = state.my_player()
+    wanted_costs = {}
+    for r in wanted:
+        wanted_costs[r] = wanted_costs.get(r, 0) + 1
+    if not can_afford(player, wanted_costs):
+        return False
+
+    income = board_income(state)
+    gain = sum(resource_need_score(r, income, state) for r in offered)
+    cost = sum(resource_need_score(r, income, state) for r in wanted)
+    return gain > cost
+
+def choose_year_of_plenty(state):
+    """Pick 2 resources (bank gift, duplicates allowed) favouring unmet build needs.
+    Each pick discounts its own score before the second pick, so we cover a second
+    distinct deficit instead of doubling up unless one resource is needed twice."""
+    income = board_income(state)
+    picks = []
+    picked_counts = {}
+    for _ in range(2):
+        def score(r):
+            return resource_need_score(r, income, state) / (1 + picked_counts.get(r, 0))
+        chosen = max(range(1, 6), key=score)
+        picks.append(chosen)
+        picked_counts[chosen] = picked_counts.get(chosen, 0) + 1
+    return picks
+
 def try_bank_trade(state):
     player = state.my_player()
     res = player.resources
@@ -262,7 +298,16 @@ def decide_turn(state):
         best = max(city_spots, key=lambda v: score_vertex(v, state))
         return {"action": Action.BUILD_CITY, "payload": best, "sequence": state.next_sequence()}
 
+    if not state.dev_card_played and 15 in state.turn_start_dev_cards:
+        state.dev_card_played = True
+        return {"action": Action.CONFIRM_DEV_CARD, "payload": 15, "sequence": state.next_sequence()}
+
     road_spots = valid_road_spots(state)
+    if not state.dev_card_played and 14 in state.turn_start_dev_cards and road_spots:
+        state.dev_card_played = True
+        state.road_building_pending = 2
+        return {"action": Action.CONFIRM_DEV_CARD, "payload": 14, "sequence": state.next_sequence()}
+
     if not settlement_spots and road_spots and can_afford(player, ROAD_COST):
         return {"action": Action.BUILD_ROAD, "payload": best_road(road_spots, state), "sequence": state.next_sequence()}
 
@@ -270,7 +315,7 @@ def decide_turn(state):
     if trade:
         return trade
 
-    if not state.dev_card_played and 13 in player.dev_cards:
+    if not state.dev_card_played and 13 in state.turn_start_dev_cards:
         state.dev_card_played = True
         return {"action": Action.CONFIRM_DEV_CARD, "payload": 13, "sequence": state.next_sequence()}
 
@@ -294,6 +339,19 @@ def decide(msg_type, msg_payload, state):
             "payload": calculate_placement_settlement(state, msg_payload),
             "sequence": state.next_sequence()
         }
+    elif msg_type == MsgType.AVAILABLE_ROAD_PLACEMENTS and msg_payload and state.road_building_pending > 0:
+        # Road Building dev card: two free roads. First road's action code is
+        # unverified per notes.md (guessed as regular Build Road); second is
+        # confirmed as action 21.
+        is_first = state.road_building_pending == 2
+        state.road_building_pending -= 1
+        action_code = Action.BUILD_ROAD if is_first else Action.ROAD_BUILDING_SECOND_ROAD
+        time.sleep(1.0)
+        return {
+            "action": action_code,
+            "payload": best_road(msg_payload, state),
+            "sequence": state.next_sequence()
+        }
     elif msg_type == MsgType.AVAILABLE_ROAD_PLACEMENTS and msg_payload:
         time.sleep(1.5)
         return {
@@ -308,8 +366,25 @@ def decide(msg_type, msg_payload, state):
         target = max(candidates, key=lambda c: sum(state.players[c].resources.values()))
         return {"action": Action.STEAL_FROM_PLAYER, "payload": target, "sequence": state.next_sequence()}
 
-    elif msg_type == MsgType.MONOPOLY_PROMPT:
-        # pick resource that maximises (what opponents hold) * (how much we need it)
+    elif msg_type == MsgType.CHOOSE_PLAYER_TO_ROB_KNIGHT and msg_payload:
+        # same steal-selection prompt as type 29, but triggered by playing a knight pre-roll,
+        # with candidates nested under selectPlayerFormat instead of top-level
+        state.robber_pending = False
+        candidates = msg_payload.get('selectPlayerFormat', {}).get('playersToSelect', [])
+        target = max(candidates, key=lambda c: sum(state.players[c].resources.values()))
+        return {"action": Action.STEAL_FROM_PLAYER, "payload": target, "sequence": state.next_sequence()}
+
+    elif msg_type == MsgType.CARD_SELECTION_PROMPT:
+        card_format = msg_payload.get('selectCardFormat', {})
+        amount = card_format.get('amountOfCardsToSelect', 1)
+        dev_card_used = msg_payload.get('developmentCardUsed')
+
+        if dev_card_used == 15 or amount == 2:
+            # Year of Plenty: take 2 resources from the bank, no opponent component
+            time.sleep(0.5)
+            return {"action": Action.CONFIRM_CARD_SELECTION, "payload": choose_year_of_plenty(state), "sequence": state.next_sequence()}
+
+        # Monopoly: pick resource that maximises (what opponents hold) * (how much we need it)
         income = board_income(state)
         opponent_totals = {r: 0 for r in range(1, 6)}
         for color, player in state.players.items():
@@ -321,20 +396,46 @@ def decide(msg_type, msg_payload, state):
             key=lambda r: opponent_totals[r] * resource_need_score(r, income, state)
         )
         time.sleep(0.5)
-        return {"action": Action.CONFIRM_DISCARD, "payload": [chosen], "sequence": state.next_sequence()}
+        return {"action": Action.CONFIRM_CARD_SELECTION, "payload": [chosen], "sequence": state.next_sequence()}
 
     elif msg_type == MsgType.DISCARD:
         card_format = msg_payload.get('selectCardFormat', {})
         hand = card_format.get('validCardsToSelect', [])
         n = card_format.get('amountOfCardsToSelect', 0)
-        # discard most-held cards first; break ties by least valuable (lumber=1 first, ore=5 last)
+
         counts = {}
         for c in hand:
             counts[c] = counts.get(c, 0) + 1
+
+        # keep at least 1 of each resource a currently-buildable settlement/city needs
+        protect = {}
+        if valid_settlement_spots(state):
+            for r in SETTLEMENT_COST:
+                protect[r] = max(protect.get(r, 0), 1)
+        if valid_city_spots(state):
+            for r in CITY_COST:
+                protect[r] = max(protect.get(r, 0), 1)
+
+        # discard most-held cards first; break ties by least valuable (lumber=1 first, ore=5 last)
         least_valuable = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4}
-        to_discard = sorted(hand, key=lambda c: (-counts[c], least_valuable.get(c, 99)))[:n]
+        def discard_order(c):
+            return (-counts[c], least_valuable.get(c, 99))
+
+        # spare copies (beyond the protected amount) go first; only dip into protected
+        # copies if forced to reach the required discard count
+        spare_pool = []
+        protected_pool = []
+        remaining = dict(counts)
+        for c in sorted(hand, key=discard_order):
+            if remaining[c] > protect.get(c, 0):
+                spare_pool.append(c)
+                remaining[c] -= 1
+            else:
+                protected_pool.append(c)
+
+        to_discard = (spare_pool + sorted(protected_pool, key=discard_order))[:n]
         time.sleep(1.0)
-        return {"action": Action.CONFIRM_DISCARD, "payload": to_discard, "sequence": state.next_sequence()}
+        return {"action": Action.CONFIRM_CARD_SELECTION, "payload": to_discard, "sequence": state.next_sequence()}
 
     elif msg_type == MsgType.AVAILABLE_ROBBER_PLACEMENTS and msg_payload:
         state.robber_pending = True
@@ -355,6 +456,10 @@ def decide(msg_type, msg_payload, state):
         state.players[giving_player].gain_resources(receiving_cards)
         state.players[receiving_player].gain_resources(giving_cards)
         state.players[receiving_player].lose_resources(receiving_cards)
+        # if only one opponent was adjacent to the robbed hex, the server auto-steals
+        # without ever sending us a choose-player prompt (type 20/29) — this exchange
+        # is the only signal that the pending steal has resolved
+        state.robber_pending = False
         return
     elif msg_type == MsgType.GAME_STATE_UPDATE:
         diff = msg_payload.get('diff', {})
@@ -371,13 +476,16 @@ def decide(msg_type, msg_payload, state):
                 state.robber_pending = False
 
         # turnState=1 transition on our turn — set flag and optionally play knight first
-        if (
-            current_diff.get('turnState') == 1
-            and current_diff.get('currentTurnPlayerColor') == state.my_color
-        ):
+        if 'currentTurnPlayerColor' in current_diff:
+            is_my_turn = current_diff['currentTurnPlayerColor'] == state.my_color
+        else:
+            is_my_turn = state.current_turn == state.my_color
+        if current_diff.get('turnState') == 1 and is_my_turn:
             state.needs_roll = True
             player = state.my_player()
-            if not state.dev_card_played and 11 in player.dev_cards:
+            # snapshot cards owned as of turn start — cards bought this turn aren't playable yet
+            state.turn_start_dev_cards = list(player.dev_cards)
+            if not state.dev_card_played and 11 in state.turn_start_dev_cards:
                 state.dev_card_played = True
                 time.sleep(1.0)
                 return {"action": Action.CONFIRM_DEV_CARD, "payload": 11, "sequence": state.next_sequence()}
@@ -397,9 +505,12 @@ def decide(msg_type, msg_payload, state):
                 and offer_id not in state.responded_offers
             ):
                 state.responded_offers.add(offer_id)
+                offered = offer.get('offeredResources', [])
+                wanted = offer.get('wantedResources', [])
+                response = 0 if is_beneficial_trade(offered, wanted, state) else 1
                 return {
                     "action": Action.RESPOND_TO_TRADE,
-                    "payload": {"id": offer_id, "response": 1},
+                    "payload": {"id": offer_id, "response": response},
                     "sequence": state.next_sequence()
                 }
 
