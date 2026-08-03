@@ -543,7 +543,12 @@ def decide_turn(state):
     return {"action": Action.END_TURN, "payload": True, "sequence": state.next_sequence()}
 
 def decide(msg_type, msg_payload, state):
-    if msg_type == MsgType.INITIALIZE_MAP:
+    if msg_type == MsgType.GAME_SETTINGS:
+        # type 1 is the first message on a fresh WS connection (new game or reconnect) —
+        # out_sequence is per-connection state, so it resets here, not on type 4
+        state.out_sequence = 1
+        return None
+    elif msg_type == MsgType.INITIALIZE_MAP:
         state.parse_board(msg_payload)
 
         # parse_board already set current_turn/turn_state from currentState, so we can
