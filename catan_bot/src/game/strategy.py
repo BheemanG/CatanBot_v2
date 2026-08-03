@@ -34,15 +34,33 @@ def score_hex(h):
 def score_vertex(v_id, state):
     return sum(score_hex(state.hexes[h_id]) for h_id in VERTEX_TO_HEXES[v_id])
 
+def my_produced_resources(state, extra_vertex=None):
+    """Resource ids produced by hexes touching any vertex we currently own, plus
+    extra_vertex if given — lets callers ask 'what would we produce if we also settled
+    here', since a candidate settlement's own hexes count even before it's placed."""
+    vertices = {v for v, owner in enumerate(state.vertices) if owner == state.my_color}
+    if extra_vertex is not None:
+        vertices.add(extra_vertex)
+    produced = set()
+    for v in vertices:
+        for h_id in VERTEX_TO_HEXES[v]:
+            h = state.hexes[h_id]
+            if h and h.resource and h.resource != 0:
+                produced.add(h.resource)
+    return produced
+
 def port_value(v_id, state, weights=None):
-    """Strategic value of settling on a port vertex. A specific 2:1 port is worth roughly
-    an extra hex of that resource (scaled by archetype weight when known); a generic 3:1
-    port gets a flat, smaller bonus since it helps whatever we're surplus in."""
+    """Strategic value of settling on a port vertex. A generic 3:1 port is always somewhat
+    useful. A specific 2:1 port is only worth anything if we actually produce (or would
+    produce, by settling at v_id) that resource somewhere in our network — a wheat port is
+    dead weight if nothing we own makes wheat, no matter how well wheat fits our archetype."""
     port = state.ports.get(v_id)
     if not port:
         return 0
     if port['resource'] is None:
         return 1.5
+    if port['resource'] not in my_produced_resources(state, extra_vertex=v_id):
+        return 0.5
     w = weights.get(port['resource'], 1.0) if weights else 1.0
     return 2.5 * w
 
@@ -55,13 +73,16 @@ def score_vertex_buildable(v_id, state):
 def can_afford(player, costs):
     return all(player.resources.get(rsc, 0) >= amt for rsc, amt in costs.items())
 
+def is_open_vertex(v_id, state):
+    """True if v_id could legally hold a settlement — unoccupied and not adjacent to any
+    existing settlement/city (the two-road distance rule applies regardless of owner)."""
+    return state.vertices[v_id] is None and not any(state.vertices[n] is not None for n in neighbors(v_id))
+
 def valid_settlement_spots(state):
     my_edges = {e for e, owner in enumerate(state.edges) if owner == state.my_color}
     spots = []
     for v in range(54):
-        if state.vertices[v] is not None:
-            continue
-        if any(state.vertices[n] is not None for n in neighbors(v)):
+        if not is_open_vertex(v, state):
             continue
         if any(e in my_edges for e in adjacent_edges(v)):
             spots.append(v)
@@ -118,11 +139,7 @@ def reachable_settleable_vertices(candidate_edge, state):
                 visited[nv] = dist + 1
                 queue.append(nv)
 
-    return {
-        v: dist for v, dist in visited.items()
-        if state.vertices[v] is None
-        and not any(state.vertices[n] is not None for n in neighbors(v))
-    }
+    return {v: dist for v, dist in visited.items() if is_open_vertex(v, state)}
 
 def best_road(road_spots, state):
     def road_score(e):
@@ -195,13 +212,28 @@ def calculate_placement_settlement(state, msg_payload):
     return vertex
 
 def calculate_placement_road(state, msg_payload):
-    """Point toward the highest-scoring future settlement vertex reachable from this road."""
-    my_vertices = {v for v, owner in enumerate(state.vertices) if owner == state.my_color}
+    """Point toward the highest-scoring future settlement vertex actually reachable through
+    this road — BFS's past the immediate one-hop vertex (which, by the distance rule, is
+    itself never settleable once we own the adjacent settlement) the same way best_road does
+    for in-game roads. Without this, a road toward hexes boxed in by an opponent's settlement
+    next door could outscore a direction that's genuinely open, since a raw one-hop score has
+    no way to tell a rich dead end from a rich, reachable spot."""
     def road_score(edge_id):
+        reachable = reachable_settleable_vertices(edge_id, state)
+        if not reachable:
+            return -1
+        return max(score_vertex_initial(v, state) / (1 + dist) for v, dist in reachable.items())
+
+    best = max(msg_payload, key=road_score)
+    if road_score(best) != -1:
+        return best
+
+    # no settleable vertex reachable in any direction (rare) — fall back to raw one-hop score
+    my_vertices = {v for v, owner in enumerate(state.vertices) if owner == state.my_color}
+    def target_of(edge_id):
         v1, v2 = EDGE_TO_VERTICES[edge_id]
-        target = v2 if v1 in my_vertices else v1
-        return score_vertex_initial(target, state)
-    return max(msg_payload, key=road_score)
+        return v2 if v1 in my_vertices else v1
+    return max(msg_payload, key=lambda e: score_vertex_initial(target_of(e), state))
 
 def score_robber_hex(hex_id, state):
     my_color = state.my_color
