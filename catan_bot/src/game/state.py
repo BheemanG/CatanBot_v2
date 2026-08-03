@@ -55,12 +55,14 @@ class GameState:
         self.active_offers    = {}    # trade_id -> offer dict
         self.responded_offers = set() # offer IDs we've already sent action 50 for
         self.finalized_offers = set() # offer IDs (created by us) we've already sent action 51 for
+        self.rejected_trade_pairs = set() # (give, want) player-trade pairs closed without acceptance this turn
+        self.player_trade_sent_at = None # time.time() of our most recent player-trade offer this turn — hold off ending the turn a few seconds to give opponents a chance to respond
+        self.pending_player_trade = False # True from the instant we send a player trade until its id is confirmed in active_offers — closes the race where a slow echo lets try_player_trade fire again and send a duplicate before the first is even acknowledged
         self.needs_roll       = False # True after turnState=1 transition; cleared on roll
         self.dev_card_played  = False # True after playing a dev card this turn
         self.robber_pending   = False # True after type 33 handled; cleared after steal or if no opponents adjacent
         self.road_building_pending = 0 # roads left to place from an active Road Building dev card
         self.turn_start_dev_cards = [] # snapshot of dev_cards owned as of the start of our current turn (playable set)
-        self.build_archetype  = None  # 'ows' or 'lb' — set once our first settlement is placed
         self.out_sequence     = 1
         self.players = {0: self._make_bank()}
     
@@ -125,12 +127,14 @@ class GameState:
         self.active_offers    = {}
         self.responded_offers = set()
         self.finalized_offers = set()
+        self.rejected_trade_pairs = set()
+        self.player_trade_sent_at = None
+        self.pending_player_trade = False
         self.needs_roll       = False
         self.dev_card_played  = False
         self.robber_pending   = False
         self.road_building_pending = 0
         self.turn_start_dev_cards = []
-        self.build_archetype  = None
 
         self.players = {0: self._make_bank()}
         for p in msg_payload.get('playerUserStates'):
@@ -260,11 +264,33 @@ class GameState:
         # every other player's previously recorded response
         for offer_id, offer in diff.get('tradeState', {}).get('activeOffers', {}).items():
             if offer is None:
-                self.active_offers.pop(offer_id, None)
+                was_finalized = offer_id in self.finalized_offers
+                closed = self.active_offers.pop(offer_id, None)
                 self.responded_offers.discard(offer_id)
                 self.finalized_offers.discard(offer_id)
+                # closed without ever being finalized == nobody accepted (or we never
+                # got to finalize before it expired) — remember the pair so
+                # try_player_trade doesn't immediately re-propose the same ask.
+                # (no isBankTrade check here: colonist's activeOffers echoes never carry
+                # that field — bank trades resolve instantly via type 43 and never enter
+                # activeOffers at all, so every entry here is already a player trade)
+                if (
+                    closed
+                    and not was_finalized
+                    and closed.get('creator') == self.my_color
+                ):
+                    offered = closed.get('offeredResources') or []
+                    wanted = closed.get('wantedResources') or []
+                    if offered and wanted:
+                        self.rejected_trade_pairs.add((offered[0], wanted[0]))
             else:
+                is_new = offer_id not in self.active_offers
                 existing = self.active_offers.setdefault(offer_id, {})
+                if is_new and offer.get('creator') == self.my_color:
+                    # confirmation that our pending send actually landed and got an id —
+                    # the active_offers-based outstanding-offer guard in try_player_trade
+                    # takes over from here, so the local pending flag is no longer needed
+                    self.pending_player_trade = False
                 for key, value in offer.items():
                     if key in ('playerResponses', 'playersCreatingCounterOffer') and isinstance(value, dict):
                         existing.setdefault(key, {}).update(value)
@@ -278,6 +304,9 @@ class GameState:
                 self.needs_roll      = False
                 self.dev_card_played = False
                 self.road_building_pending = 0
+                self.rejected_trade_pairs = set()
+                self.player_trade_sent_at = None
+                self.pending_player_trade = False
             self.current_turn = current['currentTurnPlayerColor']
         if 'turnState' in current:
             self.turn_state = current['turnState']

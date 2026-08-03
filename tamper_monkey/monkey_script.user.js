@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Catan Bot
 // @namespace    http://tampermonkey.net/
-// @version      3.2
+// @version      3.3
 // @match        *://*.colonist.io/*
 // @run-at       document-start
 // @require      https://cdnjs.cloudflare.com/ajax/libs/msgpack-lite/0.1.26/msgpack.min.js
@@ -19,7 +19,51 @@
 
     let capturedHeader = null;
 
-    function postWithRetry(url, data, onload, attempt = 1, maxAttempts = 5, delayMs = 500) {
+    // Reload the page if the Flask server restarts (new boot_id) or if no
+    // incoming game message has arrived in STALE_MS while we're in a game
+    // (signals a hung/desynced connection). RELOAD_GRACE_MS delays the first
+    // staleness check after each load so a fresh reconnect has time to
+    // receive a message before we'd reload again.
+    const RELOAD_GRACE_MS = 15000;
+    const RELOAD_POLL_MS = 3000;
+    let knownBootId = null;
+    const pageLoadedAt = Date.now();
+
+    function checkReload() {
+        if (!isInGame()) return;
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: 'http://localhost:5000/state/reload_check',
+            timeout: 3000,
+            onload: function(response) {
+                let data;
+                try {
+                    data = JSON.parse(response.responseText);
+                } catch (e) {
+                    return;
+                }
+                if (knownBootId === null) {
+                    knownBootId = data.boot_id;
+                    return;
+                }
+                if (data.boot_id !== knownBootId) {
+                    console.log('[CATAN] Server restarted, reloading page');
+                    window.location.reload();
+                    return;
+                }
+                if (data.stale && Date.now() - pageLoadedAt > RELOAD_GRACE_MS) {
+                    console.log('[CATAN] No incoming messages recently, reloading page');
+                    window.location.reload();
+                }
+            },
+            onerror: function(e) {},
+            ontimeout: function(e) {}
+        });
+    }
+
+    setInterval(checkReload, RELOAD_POLL_MS);
+
+    function postWithRetry(url, data, onload, attempt = 1, maxAttempts = 5, delayMs = 500, onGiveUp) {
         GM_xmlhttpRequest({
             method: 'POST',
             url: url,
@@ -35,13 +79,23 @@
             if (attempt < maxAttempts) {
                 console.log(`[CATAN] Python server not reachable (attempt ${attempt}/${maxAttempts}), retrying in ${delayMs}ms`, e);
                 setTimeout(() => {
-                    postWithRetry(url, data, onload, attempt + 1, maxAttempts, delayMs * 2);
+                    postWithRetry(url, data, onload, attempt + 1, maxAttempts, delayMs * 2, onGiveUp);
                 }, delayMs);
             } else {
                 console.log('[CATAN] Python server not reachable, giving up after', maxAttempts, 'attempts', e);
+                if (onGiveUp) onGiveUp(e);
             }
         }
     }
+
+    // Action 67 is colonist's own authoritative sequence-resync signal (see server.py's
+    // /outgoing handler). Reporting it to Flask happens over an async POST that races
+    // against the /incoming POSTs for whatever WS IN messages arrive right after a
+    // reconnect (type 1/4/etc). If a response gets computed before that resync POST
+    // lands, it stamps the wrong (stale) sequence, which just provokes another action 67
+    // from colonist. This promise lets the WS message handler wait for the resync to be
+    // durably applied server-side before forwarding any further message to /incoming.
+    let pendingActionResync = null;
 
     const OriginalWebSocket = unsafeWindow.WebSocket;
 
@@ -80,6 +134,11 @@
 
                 console.log('[WS IN]', JSON.stringify(decoded, null, 2));
 
+                if (pendingActionResync) {
+                    await pendingActionResync;
+                    pendingActionResync = null;
+                }
+
                 postWithRetry('http://localhost:5000/incoming', JSON.stringify(decoded), function(response) {
                     const result = JSON.parse(response.responseText);
                     if (result.action !== null && result.action !== undefined) {
@@ -108,9 +167,19 @@
 
                     console.log('[WS OUT]', JSON.stringify(payload, null, 2));
 
-                    if (!isInGame()) return originalSend(data);
+                    // action 67 is colonist's own desync-correction signal (see server.py's
+                    // /outgoing handler) — it must always reach Flask even if isInGame()'s
+                    // URL-hash heuristic reads false at that moment, unlike every other
+                    // outgoing message which is fine to skip while not in a game
+                    if (!isInGame() && payload?.action !== 67) return originalSend(data);
 
-                    postWithRetry('http://localhost:5000/outgoing', JSON.stringify(payload), function(response) {});
+                    if (payload?.action === 67) {
+                        pendingActionResync = new Promise((resolve) => {
+                            postWithRetry('http://localhost:5000/outgoing', JSON.stringify(payload), () => resolve(), 1, 5, 500, () => resolve());
+                        });
+                    } else {
+                        postWithRetry('http://localhost:5000/outgoing', JSON.stringify(payload), function(response) {});
+                    }
                 } catch(e) {
                     console.log('[WS OUT BYTES]', Array.from(bytes));
                 }

@@ -1,3 +1,6 @@
+import time
+import uuid
+
 from flask import Flask, request, jsonify, abort
 from flask_cors import CORS
 from src.game.state import GameState
@@ -7,8 +10,11 @@ app = Flask(__name__)
 CORS(app)
 
 ALLOWED_ORIGIN = 'https://colonist.io'
+STALE_THRESHOLD_SECONDS = 10
 
 state = GameState()
+server_boot_id = uuid.uuid4().hex
+last_incoming_at = None
 
 def check_origin():
     origin = request.headers.get('Origin', '')
@@ -29,6 +35,8 @@ def add_headers(response):
 @app.route('/incoming', methods=['POST'])
 def handle_incoming():
     check_origin()
+    global last_incoming_at
+    last_incoming_at = time.time()
     data = request.json
 
     msg_id = data.get('id')
@@ -44,7 +52,6 @@ def handle_incoming():
     action = decide(msg_type, msg_payload, state)
     if action is None:
         return no_action()
-    print(f'[WS OUT DRAFT] {action}')
     return jsonify(action)
 
 @app.route('/state/ui', methods=['GET'])
@@ -67,6 +74,11 @@ refresh();
 setInterval(refresh, 1000);
 </script>
 </body></html>'''
+
+@app.route('/state/reload_check', methods=['GET'])
+def handle_reload_check():
+    stale = last_incoming_at is not None and (time.time() - last_incoming_at) > STALE_THRESHOLD_SECONDS
+    return jsonify({"boot_id": server_boot_id, "stale": stale})
 
 @app.route('/state', methods=['GET'])
 def handle_state():
@@ -98,7 +110,11 @@ def handle_outgoing():
     check_origin()
     data = request.json
     seq = data.get('sequence')
-    if seq is not None:
+    # action 67 is sent by the browser itself (not by us) whenever colonist's client
+    # detects a desync and resets its own sequence counter — its value is authoritative
+    # and must be adopted even if it's lower than what we've been tracking, unlike other
+    # outgoing messages where a lower sequence just means an out-of-order/stale POST
+    if seq is not None and (data.get('action') == 67 or seq > state.out_sequence):
         state.out_sequence = seq
         print(f'[OUT SEQ UPDATED] {seq}')
     return jsonify({}), 200

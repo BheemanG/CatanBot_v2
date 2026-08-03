@@ -6,7 +6,7 @@ from src.constants.board import (
     EDGE_TO_VERTICES,
     VERTEX_TO_HEXES,
     HEX_TO_VERTICES,
-    HEX_RING,
+    OUTSIDE_VERTICES,
 )
 from src.constants.message_types import MsgType, Action
 from src.game.graph import (
@@ -32,6 +32,17 @@ MAX_CITIES      = 4  # physical piece limit
 EARLY_GAME_VP = 4  # below this, prioritize expanding (roads/settlements) over trading or dev cards
 
 SURPLUS_DUMP_THRESHOLD = 6  # at/above this count, trade the resource away regardless of other give-side protections
+
+ALREADY_HAVE_ENOUGH = 1     # already holding this many of a resource makes receiving more not worth it
+HIGH_PRODUCTION_PIPS = 6    # board income at/above this means we don't need to trade for more of it
+
+TRADE_RESPONSE_WAIT_SECONDS = 5  # hold off ending the turn this long after a player trade offer, to give opponents a chance to respond
+
+MIN_HAND_FOR_BANK_TRADE = 5  # below this total hand size, a bank trade's ratio cost eats too much of what little we have
+
+INCOME_EMPHASIS = 2  # exponent on board income in need/shortfall scoring — >1 makes production
+                      # (pips we already roll for) matter more than raw demand or hand count when
+                      # deciding what's safe to give away vs. worth protecting/receiving
 
 def score_hex(h):
     value = DICE_VALUE.get(h.dice, 0)
@@ -155,46 +166,33 @@ def best_road(road_spots, state):
         return max(score_vertex_buildable(v, state) / (1 + dist) for v, dist in reachable.items())
     return max(road_spots, key=road_score)
 
-# Ore-Wheat-Sheep: favours ore/grain, sheep moderately — halved deviation from neutral (1.0)
-# vs. the original weights so raw pips and resource diversity drive vertex scoring first,
-# with archetype fit acting as a lighter tie-breaking nudge rather than the dominant term.
-OWS_WEIGHTS = {5: 1.25, 4: 1.2, 3: 1.05, 1: 0.85, 2: 0.85}
-# Lumber-Brick: favours lumber/brick — same halved-deviation treatment as OWS_WEIGHTS.
-LB_WEIGHTS  = {1: 1.25, 2: 1.25, 3: 1.0, 4: 0.9, 5: 0.8}
-ARCHETYPE_WEIGHTS = {'ows': OWS_WEIGHTS, 'lb': LB_WEIGHTS}
+# Ore-Wheat-Sheep: a light lean toward ore/grain/wool — kept close to neutral (1.0) so raw
+# pips and resource diversity (DIVERSITY_WEIGHT) remain the dominant factors in initial
+# placement; this is just a tie-breaking nudge, not a committed archetype.
+OWS_WEIGHTS = {5: 1.1, 4: 1.08, 3: 1.03, 1: 0.95, 2: 0.95}
 
-DIVERSITY_WEIGHT = 1.5  # bonus per distinct resource type touched by a single vertex
+DIVERSITY_WEIGHT = 2.0  # bonus per distinct resource type touched by a single vertex — the primary driver
 
-def score_vertex_weighted(v_id, state, weights):
+def score_vertex_weighted(v_id, state):
     score = 0
     resources = set()
     for h_id in VERTEX_TO_HEXES[v_id]:
         h = state.hexes[h_id]
         if not h or not h.resource or h.resource == 0:
             continue
-        score += DICE_VALUE.get(h.dice, 0) * weights.get(h.resource, 1.0)
+        score += DICE_VALUE.get(h.dice, 0) * OWS_WEIGHTS.get(h.resource, 1.0)
         resources.add(h.resource)
     score += len(resources) * DIVERSITY_WEIGHT
-    score += port_value(v_id, state, weights)
+    score += port_value(v_id, state, OWS_WEIGHTS)
     return score
 
 def score_vertex_initial(v_id, state):
-    """First settlement: score under both the Ore-Wheat-Sheep and Lumber-Brick archetypes
-    and take whichever the board rewards more — lets the opening go wherever the hexes
-    actually support. Second settlement: score under the archetype the first settlement
-    committed us to (state.build_archetype), plus a smaller bonus for resource types
-    the first settlement didn't cover, so we still hedge a little instead of going
-    all-in on one archetype."""
-    have_settlement = any(owner == state.my_color for owner in state.vertices)
-
-    if not have_settlement:
-        return max(
-            score_vertex_weighted(v_id, state, OWS_WEIGHTS),
-            score_vertex_weighted(v_id, state, LB_WEIGHTS),
-        )
-
-    weights = ARCHETYPE_WEIGHTS.get(state.build_archetype, OWS_WEIGHTS)
-    score = score_vertex_weighted(v_id, state, weights)
+    """Score every candidate by raw dice-weighted pips plus a bonus per distinct resource
+    type touched (resource diversity is the primary driver), with only a light OWS lean
+    as a tie-breaking nudge — not a committed archetype. The second settlement additionally
+    gets a smaller bonus for resource types the first settlement didn't already cover, so
+    the pair hedges toward covering all resource types rather than doubling up."""
+    score = score_vertex_weighted(v_id, state)
 
     covered = set()
     for v, owner in enumerate(state.vertices):
@@ -209,27 +207,14 @@ def score_vertex_initial(v_id, state):
         if not h or not h.resource or h.resource == 0:
             continue
         if h.resource not in covered and h.resource not in seen:
-            score += DICE_VALUE.get(h.dice, 0) * 0.5  # smaller nudge than the archetype weighting
+            score += DICE_VALUE.get(h.dice, 0) * 0.5  # smaller nudge than the primary scoring
             seen.add(h.resource)
     return score
 
 def calculate_placement_settlement(state, msg_payload):
-    is_first = not any(owner == state.my_color for owner in state.vertices)
     vertex = max(msg_payload, key=lambda v_id: score_vertex_initial(v_id, state))
-    if is_first:
-        ows = score_vertex_weighted(vertex, state, OWS_WEIGHTS)
-        lb = score_vertex_weighted(vertex, state, LB_WEIGHTS)
-        state.build_archetype = 'ows' if ows >= lb else 'lb'
     state.vertices[vertex] = state.my_color
     return vertex
-
-OUTWARD_BIAS_WEIGHT = 2.0  # per ring step; only applied in 4-player games
-
-def outward_bias(v_id):
-    """Average ring distance from the board center of hexes touching v_id (0 = center,
-    2 = outer ring) — higher means closer to the map's edge."""
-    hexes = VERTEX_TO_HEXES[v_id]
-    return sum(HEX_RING.get(h, 0) for h in hexes) / len(hexes)
 
 def calculate_placement_road(state, msg_payload):
     """Point toward the highest-scoring future settlement vertex actually reachable through
@@ -239,21 +224,23 @@ def calculate_placement_road(state, msg_payload):
     next door could outscore a direction that's genuinely open, since a raw one-hop score has
     no way to tell a rich dead end from a rich, reachable spot.
 
-    In 4-player games the center of the board gets contested fast, so reachable vertices get
-    an extra nudge toward the map's outside (higher HEX_RING) on top of their resource score."""
+    In 4-player games the center of the board gets contested fast, so instead of scoring by
+    resource value at all, point straight at whichever reachable coastline vertex
+    (OUTSIDE_VERTICES — anything touching fewer than 3 hexes is on the outer boundary) is
+    closest, since claiming outward territory before it's boxed in matters more here than
+    which specific spot has the best pips."""
     four_player = (len(state.players) - 1) == 4  # players dict includes bank at key 0
-
-    def vertex_value(v):
-        score = score_vertex_initial(v, state)
-        if four_player:
-            score += outward_bias(v) * OUTWARD_BIAS_WEIGHT
-        return score
 
     def road_score(edge_id):
         reachable = reachable_settleable_vertices(edge_id, state)
         if not reachable:
             return -1
-        return max(vertex_value(v) / (1 + dist) for v, dist in reachable.items())
+        if four_player:
+            outside_dists = [dist for v, dist in reachable.items() if v in OUTSIDE_VERTICES]
+            if outside_dists:
+                return -min(outside_dists)
+            return -999  # no coastline vertex reachable this direction at all
+        return max(score_vertex_initial(v, state) / (1 + dist) for v, dist in reachable.items())
 
     best = max(msg_payload, key=road_score)
     if road_score(best) != -1:
@@ -264,7 +251,7 @@ def calculate_placement_road(state, msg_payload):
     def target_of(edge_id):
         v1, v2 = EDGE_TO_VERTICES[edge_id]
         return v2 if v1 in my_vertices else v1
-    return max(msg_payload, key=lambda e: vertex_value(target_of(e)))
+    return max(msg_payload, key=lambda e: score_vertex_initial(target_of(e), state))
 
 def score_robber_hex(hex_id, state):
     my_color = state.my_color
@@ -293,7 +280,10 @@ def board_income(state):
 
 def resource_need_score(r, income, state):
     """Higher = more beneficial to trade for this resource.
-    Favours resources we generate little of and need for upcoming builds."""
+    Favours resources we generate little of and need for upcoming builds. The income term is
+    raised to INCOME_EMPHASIS so how much we already produce a resource ourselves outweighs raw
+    demand/count — a resource with no board income of our own is both much more worth receiving
+    and much riskier to give away, since dice rolls will never refill it for us."""
     player = state.my_player()
     count = player.resources.get(r, 0)
 
@@ -306,13 +296,65 @@ def resource_need_score(r, income, state):
         + ROAD_COST.get(r, 0) * (1 if (not settlement_spots and road_spots) else 0)
         + DEV_CARD_COST.get(r, 0)
     )
-    return (demand + 1) / (income.get(r, 0) + 1) / (count + 1)
+    return (demand + 1) / (income.get(r, 0) + 1) ** INCOME_EMPHASIS / (count + 1)
+
+def active_build_goals(state, player):
+    """Currently pursuable build costs — settlement/city/road wherever spots are open, plus
+    dev card once past EARLY_GAME_VP (or as the sole fallback goal if nothing else applies).
+    Shared by is_beneficial_trade and both try_*_trade functions so "what do we actually
+    still need" is computed the same way everywhere."""
+    goals = []
+    if valid_settlement_spots(state):
+        goals.append(SETTLEMENT_COST)
+    if valid_city_spots(state):
+        goals.append(CITY_COST)
+    if valid_road_spots(state):
+        goals.append(ROAD_COST)
+    if player.vp >= EARLY_GAME_VP:
+        goals.append(DEV_CARD_COST)
+    if not goals:
+        goals = [DEV_CARD_COST]
+    return goals
+
+def needed_amounts(goals):
+    """Max amount any active goal's cost requires, per resource."""
+    needed = {}
+    for cost in goals:
+        for r, amt in cost.items():
+            needed[r] = max(needed.get(r, 0), amt)
+    return needed
+
+def worth_wanting_more(r, res, income, needed):
+    """True if resource r is still worth acquiring more of — either some active goal needs
+    more of it than we currently hold, or (for resources no goal needs more of) we're below
+    ALREADY_HAVE_ENOUGH and don't already produce plenty of it ourselves."""
+    if res.get(r, 0) < needed.get(r, 0):
+        return True
+    return res.get(r, 0) < ALREADY_HAVE_ENOUGH and income.get(r, 0) < HIGH_PRODUCTION_PIPS
 
 def is_beneficial_trade(offered, wanted, state):
     """offered = resources the creator gives us, wanted = resources they want from us.
-    Beneficial if we can actually give what's wanted and what we receive is worth more
-    to us (by resource_need_score) than what we give up."""
+    Build costs need every resource type simultaneously (a settlement needs brick AND
+    lumber AND wool AND grain), so comparing aggregate resource_need_score sums can accept
+    a trade that looks good in the abstract but actually hurts us — e.g. giving up our only
+    brick for a 2nd grain scores well on need-score alone (grain's demand weight is high)
+    even though it strictly makes every build harder, not easier.
+
+    Instead, simulate the post-trade hand and compare total resource shortfall against our
+    best currently-available build goal (settlement/city/road with open spots, or dev card
+    as fallback) — only accept if the trade strictly reduces that shortfall for at least one
+    real goal. Falls back to the need-score comparison only when the trade is a wash (doesn't
+    change shortfall either way) — a genuine lateral resource-shape optimization.
+
+    Before any of that: decline outright if nothing on offer is actually worth receiving —
+    i.e. every offered resource is one we already hold enough of for every active build goal
+    (a city needing 2 grain still makes a 2nd grain worth receiving even though we already
+    hold 1 — ALREADY_HAVE_ENOUGH is only the floor for resources no active goal needs more
+    of), and is either at/above ALREADY_HAVE_ENOUGH or something we produce plenty of
+    (board_income >= HIGH_PRODUCTION_PIPS). More of a resource no real goal is short on isn't
+    worth giving anything up for, whatever the shortfall math below says."""
     player = state.my_player()
+    res = player.resources
     wanted_costs = {}
     for r in wanted:
         wanted_costs[r] = wanted_costs.get(r, 0) + 1
@@ -320,6 +362,34 @@ def is_beneficial_trade(offered, wanted, state):
         return False
 
     income = board_income(state)
+    goals = active_build_goals(state, player)
+    needed_for_goals = needed_amounts(goals)
+
+    if not any(worth_wanting_more(r, res, income, needed_for_goals) for r in offered):
+        return False
+
+    post = dict(res)
+    for r in wanted:
+        post[r] = post.get(r, 0) - 1
+    for r in offered:
+        post[r] = post.get(r, 0) + 1
+
+    # weight each missing unit by how hard it'd be to replace ourselves — a shortfall in a
+    # resource with no (or thin) board income of our own counts for more than the same
+    # shortfall in something the dice hand us regularly, since only the former is a real risk
+    # to actually giving up (mirrors resource_need_score's income emphasis)
+    def shortfall(resources, cost):
+        return sum(
+            max(0, amt - resources.get(r, 0)) / (income.get(r, 0) + 1) ** INCOME_EMPHASIS
+            for r, amt in cost.items()
+        )
+
+    before = min(shortfall(res, cost) for cost in goals)
+    after = min(shortfall(post, cost) for cost in goals)
+
+    if after != before:
+        return after < before
+
     gain = sum(resource_need_score(r, income, state) for r in offered)
     cost = sum(resource_need_score(r, income, state) for r in wanted)
     return gain > cost
@@ -387,6 +457,13 @@ def best_build_completing_trade(state, give_pool, ratios, settlement_spots, city
 def try_bank_trade(state):
     player = state.my_player()
     res = player.resources
+
+    # a bank trade always costs a whole ratio's worth of one resource (2-4 cards) for just
+    # 1 back — with a thin hand that's too big a chunk to give up, even for a build-completing
+    # trade, so skip bank trading entirely until the hand has some real depth to it
+    if sum(res.values()) < MIN_HAND_FOR_BANK_TRADE:
+        return None
+
     ratios = state.port_ratios()
     income = board_income(state)
 
@@ -404,36 +481,44 @@ def try_bank_trade(state):
     overflow_pool = [r for r in tradeable if res.get(r, 0) >= SURPLUS_DUMP_THRESHOLD]
 
     give_pool = sorted(set(protected_pool) | set(overflow_pool))
-    if not give_pool:
+
+    # the early-game lumber/brick exclusion protects them for future builds, but a
+    # build-completing trade already only spends surplus beyond what that same build
+    # needs (see best_build_completing_trade's own per-build check) — so it's exempt
+    build_give_pool = [r for r in tradeable if income.get(r, 0) > 0]
+
+    if not give_pool and not build_give_pool:
         return None
 
     settlement_spots = valid_settlement_spots(state)
     city_spots = valid_city_spots(state)
     road_spots = valid_road_spots(state)
 
-    build_trade = best_build_completing_trade(state, give_pool, ratios, settlement_spots, city_spots)
+    build_trade = best_build_completing_trade(state, build_give_pool, ratios, settlement_spots, city_spots)
     if build_trade:
         give, want = build_trade
+    elif not give_pool:
+        return None
     else:
         # proactive: any resource at SURPLUS_DUMP_THRESHOLD+ risks a discard on a 7 — trade it down now
         has_surplus = any(res.get(r, 0) >= SURPLUS_DUMP_THRESHOLD for r in give_pool)
 
         if not has_surplus:
             # targeted: only trade if one trade closes a single-resource deficit for a build
-            goals = []
+            unlock_goals = []
             if settlement_spots:
-                goals.append(SETTLEMENT_COST)
+                unlock_goals.append(SETTLEMENT_COST)
             if city_spots:
-                goals.append(CITY_COST)
+                unlock_goals.append(CITY_COST)
             if not settlement_spots and road_spots:
-                goals.append(ROAD_COST)
+                unlock_goals.append(ROAD_COST)
             if player.vp >= EARLY_GAME_VP:
-                goals.append(DEV_CARD_COST)
+                unlock_goals.append(DEV_CARD_COST)
 
             can_unlock = any(
                 res.get(needed, 0) < amt
                 and any(r != needed for r in give_pool)
-                for cost in goals
+                for cost in unlock_goals
                 for needed, amt in cost.items()
                 if res.get(needed, 0) < amt
             )
@@ -444,6 +529,33 @@ def try_bank_trade(state):
         want_candidates = [r for r in range(1, 6) if r not in give_pool]
         if not want_candidates:
             want_candidates = sorted(range(1, 6), key=lambda r: res.get(r, 0))
+
+        if not has_surplus:
+            # don't ask for a duplicate of something we already have enough of — only the
+            # proactive discard-risk dump (has_surplus) skips this, since converting excess
+            # into *anything* still beats losing it to a random 7
+            goals = active_build_goals(state, player)
+            needed_for_goals = needed_amounts(goals)
+            worth_wanting = [r for r in want_candidates if worth_wanting_more(r, res, income, needed_for_goals)]
+            if not worth_wanting:
+                return None
+            want_candidates = worth_wanting
+
+        # prefer rarer resources (board income below HIGH_PRODUCTION_PIPS) over ones we
+        # already produce consistently — no point trading for more of what the dice hand
+        # us regularly — unless a settlement or city we can currently work toward still
+        # needs more of that specific resource than we have
+        settlement_city_needs = set()
+        for cost in ([SETTLEMENT_COST] if settlement_spots else []) + ([CITY_COST] if city_spots else []):
+            for r, amt in cost.items():
+                if res.get(r, 0) < amt:
+                    settlement_city_needs.add(r)
+        rare_candidates = [
+            r for r in want_candidates
+            if income.get(r, 0) < HIGH_PRODUCTION_PIPS or r in settlement_city_needs
+        ]
+        if rare_candidates:
+            want_candidates = rare_candidates
 
         want = max(want_candidates, key=lambda r: resource_need_score(r, income, state))
         # prefer the resource with the most trades' worth of surplus once its port ratio is
@@ -473,49 +585,144 @@ def try_bank_trade(state):
         "sequence": state.next_sequence(),
     }
 
-def try_player_trade(state):
-    """Propose a 1-for-1 trade to the table (action 49, isBankTrade=False) as a fallback
-    when try_bank_trade found nothing. Only proposes (give, want) pairs where some opponent
-    holds more than 1 of `want` (so they can actually spare one) and none of `give` (so it's
-    something they'd want), we hold multiple of `give` (so parting with one still leaves us
-    some), and `want` scores as genuinely valuable to us via resource_need_score (low income,
-    low count) — not just a resource we happen to be short on right now."""
+def best_build_completing_player_trade(state, give_pool):
+    """Mirrors best_build_completing_trade but for 1-for-1 player trades: if a settlement or
+    city is exactly one resource short, and at least one opponent holds any of it at all,
+    offering it directly beats the generic opponent-matching search in try_player_trade —
+    completing a build is worth asking for even if no opponent happens to fit the usual
+    '>1 held, 0 of our give' pattern that search requires."""
     player = state.my_player()
     res = player.resources
-    income = board_income(state)
 
-    # never give away a resource we don't produce on the board at all, and below
-    # EARLY_GAME_VP also protect lumber/brick specifically for road/settlement building
-    give_pool = [r for r in range(1, 6) if res.get(r, 0) >= 2 and income.get(r, 0) > 0]
-    if player.vp < EARLY_GAME_VP:
-        give_pool = [r for r in give_pool if r not in (1, 2)]
-    if not give_pool:
-        return None
+    goals = []
+    if valid_settlement_spots(state):
+        goals.append(SETTLEMENT_COST)
+    if valid_city_spots(state):
+        goals.append(CITY_COST)
+
+    opponents = [opp for color, opp in state.players.items() if color not in (0, state.my_color)]
 
     candidates = []
-    for color, opp in state.players.items():
-        if color == 0 or color == state.my_color:
+    for cost in goals:
+        missing = {r: amt - res.get(r, 0) for r, amt in cost.items() if res.get(r, 0) < amt}
+        if len(missing) != 1:
             continue
-        for want in range(1, 6):
-            if opp.resources.get(want, 0) <= 1:
+        want, need = next(iter(missing.items()))
+        if need > 1:
+            continue
+        if not any(opp.resources.get(want, 0) >= 1 for opp in opponents):
+            continue  # no one at the table even has one to give
+        for give in give_pool:
+            if give == want:
                 continue
-            for give in give_pool:
-                if give == want:
-                    continue
-                if opp.resources.get(give, 0) != 0:
-                    continue
-                candidates.append((give, want))
+            # giving away one unit must not itself drop below what this same build needs
+            if res.get(give, 0) - 1 < cost.get(give, 0):
+                continue
+            candidates.append((give, want))
 
     if not candidates:
         return None
 
-    # prefer the pair where `want` is most valuable to us, discounted by how much we'd
-    # still need `give` ourselves (don't hand over something we're also short on)
-    def pair_score(gw):
-        give, want = gw
-        return resource_need_score(want, income, state) / (1 + resource_need_score(give, income, state))
-    give, want = max(candidates, key=pair_score)
+    income = board_income(state)
+    def give_score(gw):
+        give, _ = gw
+        surplus = res.get(give, 0)
+        caution = 1 / (1 + resource_need_score(give, income, state))
+        return surplus * caution
+    return max(candidates, key=give_score)
 
+def try_player_trade(state):
+    """Propose a 1-for-1 trade to the table (action 49, isBankTrade=False) as a fallback
+    when try_bank_trade found nothing. First checks best_build_completing_player_trade — if
+    a settlement or city is exactly one resource short and someone at the table holds any of
+    it, ask for that directly. Otherwise falls back to the generic search: only proposes
+    (give, want) pairs where some opponent holds more than 1 of `want` (so they can actually
+    spare one) and none of `give` (so it's something they'd want), we hold multiple of `give`
+    (so parting with one still leaves us some), `want` is actually worth acquiring more of
+    (worth_wanting_more — not a duplicate of something we already have enough of, like asking
+    for a 5th lumber), and `want` scores as genuinely valuable to us via resource_need_score
+    among what's left. Never proposes a new offer while one of ours is still outstanding, and
+    skips any (give, want) pair already closed without acceptance this turn
+    (state.rejected_trade_pairs) so a decline doesn't just get re-asked on the next tick.
+
+    decide_turn() re-runs on every type 91 diff while it's our turn, but colonist doesn't
+    echo our offer back with an id (and thus into state.active_offers) instantly — if a
+    different, unrelated type 91 arrives in that gap, the active_offers-based outstanding
+    check below hasn't caught up yet and this would otherwise fire again and send a
+    duplicate before the first send is even acknowledged. state.pending_player_trade closes
+    that race: set the instant we send, cleared once GameState.update() sees our offer
+    actually land with an id."""
+    if state.pending_player_trade:
+        return None
+    if any(o.get('creator') == state.my_color for o in state.active_offers.values()):
+        return None
+
+    player = state.my_player()
+    res = player.resources
+    income = board_income(state)
+
+    # never give away a resource we don't produce on the board at all
+    build_give_pool = [r for r in range(1, 6) if res.get(r, 0) >= 2 and income.get(r, 0) > 0]
+
+    # below EARLY_GAME_VP, also protect lumber/brick specifically for road/settlement
+    # building — except for a build-completing trade, which already only spends surplus
+    # beyond what that same build needs (see best_build_completing_player_trade's own
+    # per-build check), so there's no reason to withhold a spare brick that would directly
+    # finish the very settlement this exclusion exists to protect
+    give_pool = build_give_pool
+    if player.vp < EARLY_GAME_VP:
+        give_pool = [r for r in give_pool if r not in (1, 2)]
+
+    if not build_give_pool:
+        return None
+
+    build_trade = best_build_completing_player_trade(state, build_give_pool)
+    if build_trade:
+        give, want = build_trade
+    elif not give_pool:
+        return None
+    else:
+        goals = active_build_goals(state, player)
+        needed_for_goals = needed_amounts(goals)
+
+        candidates = []
+        for color, opp in state.players.items():
+            if color == 0 or color == state.my_color:
+                continue
+            for want in range(1, 6):
+                if opp.resources.get(want, 0) <= 1:
+                    continue
+                if not worth_wanting_more(want, res, income, needed_for_goals):
+                    continue
+                for give in give_pool:
+                    if give == want:
+                        continue
+                    if opp.resources.get(give, 0) != 0:
+                        continue
+                    # giving away one unit must not itself drop below what our own active
+                    # goals still need — e.g. don't trade away ore for grain if the very
+                    # city we're working toward needs that ore too and we have no reliable
+                    # way to replenish it
+                    if res.get(give, 0) - 1 < needed_for_goals.get(give, 0):
+                        continue
+                    if (give, want) in state.rejected_trade_pairs:
+                        continue
+                    candidates.append((give, want))
+
+        if not candidates:
+            return None
+
+        # prefer the pair where `want` is most valuable to us, discounted by how much we'd
+        # still need `give` ourselves (don't hand over something we're also short on)
+        def pair_score(gw):
+            give, want = gw
+            return resource_need_score(want, income, state) / (1 + resource_need_score(give, income, state))
+        give, want = max(candidates, key=pair_score)
+
+    if (give, want) in state.rejected_trade_pairs:
+        return None
+
+    state.pending_player_trade = True
     return {
         "action": Action.SEND_TRADE,
         "payload": {
@@ -551,12 +758,11 @@ def decide_turn(state):
         state.road_building_pending = 2
         return {"action": Action.CONFIRM_DEV_CARD, "payload": 14, "sequence": state.next_sequence()}
 
-    # below EARLY_GAME_VP, push to expand the road network toward future settlement spots
-    # even when settlement_spots isn't empty (we just can't afford one yet) — better than
-    # trading resources away this early
-    if player.vp < EARLY_GAME_VP and road_spots and can_afford(player, ROAD_COST):
-        return {"action": Action.BUILD_ROAD, "payload": best_road(road_spots, state), "sequence": state.next_sequence()}
-
+    # push to expand the road network only when we don't already have an open, reachable
+    # settlement spot — if one exists but isn't affordable yet, hold lumber/brick (protected
+    # from trading below EARLY_GAME_VP) and let try_bank_trade/try_player_trade work toward
+    # completing it instead of spending those same resources on more roads, which only
+    # pushes the settlement further out of reach
     if not settlement_spots and road_spots and can_afford(player, ROAD_COST):
         return {"action": Action.BUILD_ROAD, "payload": best_road(road_spots, state), "sequence": state.next_sequence()}
 
@@ -566,6 +772,7 @@ def decide_turn(state):
 
     trade = try_player_trade(state)
     if trade:
+        state.player_trade_sent_at = time.time()
         return trade
 
     if not state.dev_card_played and 13 in state.turn_start_dev_cards:
@@ -573,19 +780,32 @@ def decide_turn(state):
         return {"action": Action.CONFIRM_DEV_CARD, "payload": 13, "sequence": state.next_sequence()}
 
     # below EARLY_GAME_VP, don't spend scarce wool/grain/ore on a dev card — hold it for
-    # the next road/settlement instead
-    if player.vp >= EARLY_GAME_VP and can_afford(player, DEV_CARD_COST):
+    # the next road/settlement instead. Exception: a hand at/above SURPLUS_DUMP_THRESHOLD
+    # is already at risk of losing half of it to a rolled 7, and buying a dev card is the
+    # only way to shed resource cards without gaining any back (unlike a trade), so it's
+    # worth doing regardless of VP stage.
+    hand_size = sum(player.resources.values())
+    if (player.vp >= EARLY_GAME_VP or hand_size >= SURPLUS_DUMP_THRESHOLD) and can_afford(player, DEV_CARD_COST):
         return {"action": Action.BUY_DEV_CARD, "payload": True, "sequence": state.next_sequence()}
+
+    # ending the turn closes any outstanding player-trade offer of ours, so hold off for
+    # a few seconds after proposing one to give opponents an actual chance to respond.
+    # This blocks synchronously (rather than returning None and waiting to be re-invoked
+    # by a future incoming message) because the server has no other way to resume a
+    # deferred decision: it's pure request/response with no timer thread, and the
+    # Tampermonkey script drops heartbeat messages before they ever reach /incoming. If
+    # nothing else happens on the board in that window (e.g. the trade is instantly
+    # declined and closed), no further message would ever arrive to end the turn,
+    # leaving the bot silently stalled forever on what looks like a frozen game.
+    if state.player_trade_sent_at is not None:
+        remaining = TRADE_RESPONSE_WAIT_SECONDS - (time.time() - state.player_trade_sent_at)
+        if remaining > 0:
+            time.sleep(remaining)
 
     return {"action": Action.END_TURN, "payload": True, "sequence": state.next_sequence()}
 
 def decide(msg_type, msg_payload, state):
-    if msg_type == MsgType.GAME_SETTINGS:
-        # type 1 is the first message on a fresh WS connection (new game or reconnect) —
-        # out_sequence is per-connection state, so it resets here, not on type 4
-        state.out_sequence = 1
-        return None
-    elif msg_type == MsgType.INITIALIZE_MAP:
+    if msg_type == MsgType.INITIALIZE_MAP:
         state.parse_board(msg_payload)
 
         # parse_board already set current_turn/turn_state from currentState, so we can
@@ -689,19 +909,32 @@ def decide(msg_type, msg_payload, state):
         for c in hand:
             counts[c] = counts.get(c, 0) + 1
 
-        # keep at least 1 of each resource a currently-buildable settlement/city needs
-        protect = {}
-        if valid_settlement_spots(state):
-            for r in SETTLEMENT_COST:
-                protect[r] = max(protect.get(r, 0), 1)
-        if valid_city_spots(state):
-            for r in CITY_COST:
-                protect[r] = max(protect.get(r, 0), 1)
+        income = board_income(state)
 
-        # discard most-held cards first; break ties by least valuable (lumber=1 first, ore=5 last)
+        # tier 1: always keep at least 1 of a resource we don't produce much of — we have
+        # no reliable way to get more of it from dice rolls, so losing our only copy is far
+        # costlier than losing a duplicate of something the board hands us regularly
+        protect = {r: (1 if income.get(r, 0) < HIGH_PRODUCTION_PIPS else 0) for r in counts}
+
+        # tier 2: on top of the rarity floor, protect whatever amount active build goals
+        # actually need (e.g. a city's 3 ore outweighs the rarity floor's flat 1)
+        goals = []
+        if valid_settlement_spots(state):
+            goals.append(SETTLEMENT_COST)
+        if valid_city_spots(state):
+            goals.append(CITY_COST)
+        if valid_road_spots(state):
+            goals.append(ROAD_COST)
+        for cost in goals:
+            for r, amt in cost.items():
+                protect[r] = max(protect.get(r, 0), amt)
+
+        # discard order: least-produced (rarest) resources last — discard whatever we
+        # produce the most of first; ties broken by the biggest stack, then a static
+        # fallback ordering (lumber=1 first, ore=5 last)
         least_valuable = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4}
         def discard_order(c):
-            return (-counts[c], least_valuable.get(c, 99))
+            return (-income.get(c, 0), -counts[c], least_valuable.get(c, 99))
 
         # spare copies (beyond the protected amount) go first; only dip into protected
         # copies if forced to reach the required discard count
