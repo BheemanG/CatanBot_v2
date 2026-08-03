@@ -176,3 +176,11 @@ HEX_TO_VERTICES = {}
 for _v, _hexes in VERTEX_TO_HEXES.items():
     for _h in _hexes:
         HEX_TO_VERTICES.setdefault(_h, []).append(_v)
+
+# Ring distance from the board's center hex (18), by fixed physical hex position — the
+# server only randomizes resource/dice per position, never the position layout itself.
+# Ring 0 = center, 1 = middle ring (6 hexes), 2 = outer ring (12 hexes). Used to bias
+# initial road placement toward the map's outside in 4-player games.
+HEX_RING = {18: 0, 12: 1, 13: 1, 14: 1, 15: 1, 16: 1, 17: 1}
+for _h in range(12):
+    HEX_RING[_h] = 2

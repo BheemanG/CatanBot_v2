@@ -6,6 +6,7 @@ from src.constants.board import (
     EDGE_TO_VERTICES,
     VERTEX_TO_HEXES,
     HEX_TO_VERTICES,
+    HEX_RING,
 )
 from src.constants.message_types import MsgType, Action
 from src.game.graph import (
@@ -211,18 +212,37 @@ def calculate_placement_settlement(state, msg_payload):
     state.vertices[vertex] = state.my_color
     return vertex
 
+OUTWARD_BIAS_WEIGHT = 2.0  # per ring step; only applied in 4-player games
+
+def outward_bias(v_id):
+    """Average ring distance from the board center of hexes touching v_id (0 = center,
+    2 = outer ring) — higher means closer to the map's edge."""
+    hexes = VERTEX_TO_HEXES[v_id]
+    return sum(HEX_RING.get(h, 0) for h in hexes) / len(hexes)
+
 def calculate_placement_road(state, msg_payload):
     """Point toward the highest-scoring future settlement vertex actually reachable through
     this road — BFS's past the immediate one-hop vertex (which, by the distance rule, is
     itself never settleable once we own the adjacent settlement) the same way best_road does
     for in-game roads. Without this, a road toward hexes boxed in by an opponent's settlement
     next door could outscore a direction that's genuinely open, since a raw one-hop score has
-    no way to tell a rich dead end from a rich, reachable spot."""
+    no way to tell a rich dead end from a rich, reachable spot.
+
+    In 4-player games the center of the board gets contested fast, so reachable vertices get
+    an extra nudge toward the map's outside (higher HEX_RING) on top of their resource score."""
+    four_player = (len(state.players) - 1) == 4  # players dict includes bank at key 0
+
+    def vertex_value(v):
+        score = score_vertex_initial(v, state)
+        if four_player:
+            score += outward_bias(v) * OUTWARD_BIAS_WEIGHT
+        return score
+
     def road_score(edge_id):
         reachable = reachable_settleable_vertices(edge_id, state)
         if not reachable:
             return -1
-        return max(score_vertex_initial(v, state) / (1 + dist) for v, dist in reachable.items())
+        return max(vertex_value(v) / (1 + dist) for v, dist in reachable.items())
 
     best = max(msg_payload, key=road_score)
     if road_score(best) != -1:
@@ -233,7 +253,7 @@ def calculate_placement_road(state, msg_payload):
     def target_of(edge_id):
         v1, v2 = EDGE_TO_VERTICES[edge_id]
         return v2 if v1 in my_vertices else v1
-    return max(msg_payload, key=lambda e: score_vertex_initial(target_of(e), state))
+    return max(msg_payload, key=lambda e: vertex_value(target_of(e)))
 
 def score_robber_hex(hex_id, state):
     my_color = state.my_color
@@ -308,6 +328,42 @@ def choose_year_of_plenty(state):
         picked_counts[chosen] = picked_counts.get(chosen, 0) + 1
     return picks
 
+def best_build_completing_trade(state, give_pool, ratios, settlement_spots, city_spots):
+    """Look for a single bank trade that would leave us able to afford a settlement or
+    city immediately this turn — preferred over chasing our generally rarest resource,
+    since it turns the trade directly into a build instead of just rebalancing the hand.
+    Only fires when a build is exactly one resource short (a single bank trade only nets
+    1 unit of the wanted resource, so a 2+ resource deficit can't be closed in one trade)."""
+    player = state.my_player()
+    res = player.resources
+
+    goals = []
+    if settlement_spots:
+        goals.append(SETTLEMENT_COST)
+    if city_spots:
+        goals.append(CITY_COST)
+
+    candidates = []
+    for cost in goals:
+        missing = {r: amt - res.get(r, 0) for r, amt in cost.items() if res.get(r, 0) < amt}
+        if len(missing) != 1:
+            continue
+        want, need = next(iter(missing.items()))
+        if need > 1:
+            continue
+        for give in give_pool:
+            if give == want:
+                continue
+            # trading away `give` must not itself drop below what this same build needs
+            if res.get(give, 0) - ratios[give] < cost.get(give, 0):
+                continue
+            candidates.append((give, want))
+
+    if not candidates:
+        return None
+    # prefer trading away whichever resource leaves the biggest post-trade surplus
+    return max(candidates, key=lambda gw: res.get(gw[0], 0) - ratios[gw[0]])
+
 def try_bank_trade(state):
     player = state.my_player()
     res = player.resources
@@ -317,43 +373,48 @@ def try_bank_trade(state):
     if not give_pool:
         return None
 
-    # proactive: any resource at 5+ risks a discard on a 7 — trade it down now
-    has_surplus = any(res.get(r, 0) >= 5 for r in give_pool)
+    settlement_spots = valid_settlement_spots(state)
+    city_spots = valid_city_spots(state)
+    road_spots = valid_road_spots(state)
 
-    if not has_surplus:
-        # targeted: only trade if one trade closes a single-resource deficit for a build
-        settlement_spots = valid_settlement_spots(state)
-        city_spots = valid_city_spots(state)
-        road_spots = valid_road_spots(state)
-        goals = []
-        if settlement_spots:
-            goals.append(SETTLEMENT_COST)
-        if city_spots:
-            goals.append(CITY_COST)
-        if not settlement_spots and road_spots:
-            goals.append(ROAD_COST)
-        goals.append(DEV_CARD_COST)
+    build_trade = best_build_completing_trade(state, give_pool, ratios, settlement_spots, city_spots)
+    if build_trade:
+        give, want = build_trade
+    else:
+        # proactive: any resource at 5+ risks a discard on a 7 — trade it down now
+        has_surplus = any(res.get(r, 0) >= 5 for r in give_pool)
 
-        can_unlock = any(
-            res.get(needed, 0) < amt
-            and any(r != needed for r in give_pool)
-            for cost in goals
-            for needed, amt in cost.items()
-            if res.get(needed, 0) < amt
-        )
-        if not can_unlock:
-            return None
+        if not has_surplus:
+            # targeted: only trade if one trade closes a single-resource deficit for a build
+            goals = []
+            if settlement_spots:
+                goals.append(SETTLEMENT_COST)
+            if city_spots:
+                goals.append(CITY_COST)
+            if not settlement_spots and road_spots:
+                goals.append(ROAD_COST)
+            goals.append(DEV_CARD_COST)
 
-    # want: highest-need resource we don't already have 4+ of
-    income = board_income(state)
-    want_candidates = [r for r in range(1, 6) if r not in give_pool]
-    if not want_candidates:
-        want_candidates = sorted(range(1, 6), key=lambda r: res.get(r, 0))
+            can_unlock = any(
+                res.get(needed, 0) < amt
+                and any(r != needed for r in give_pool)
+                for cost in goals
+                for needed, amt in cost.items()
+                if res.get(needed, 0) < amt
+            )
+            if not can_unlock:
+                return None
 
-    want = max(want_candidates, key=lambda r: resource_need_score(r, income, state))
-    # prefer the resource with the most trades' worth of surplus once its port ratio is
-    # accounted for — a modest stack behind a 2:1 port can outrank a bigger 4:1 stack
-    give = max(give_pool, key=lambda r: (res.get(r, 0) // ratios[r], res.get(r, 0)))
+        # want: highest-need resource we don't already have 4+ of
+        income = board_income(state)
+        want_candidates = [r for r in range(1, 6) if r not in give_pool]
+        if not want_candidates:
+            want_candidates = sorted(range(1, 6), key=lambda r: res.get(r, 0))
+
+        want = max(want_candidates, key=lambda r: resource_need_score(r, income, state))
+        # prefer the resource with the most trades' worth of surplus once its port ratio is
+        # accounted for — a modest stack behind a 2:1 port can outrank a bigger 4:1 stack
+        give = max(give_pool, key=lambda r: (res.get(r, 0) // ratios[r], res.get(r, 0)))
 
     if give == want:
         return None

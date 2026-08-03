@@ -15,6 +15,7 @@ class Player:
         self.roads = [] #edge ids
         self.vp = 0
         self.dev_cards = [] #dev card ids
+        self.longest_road = 0
 
     def gain_resources(self, cards):
         for c in cards:
@@ -209,6 +210,11 @@ class GameState:
         robber = diff.get('mechanicRobberState', {})
         if 'locationTileIndex' in robber:
             self.robber_hex = robber['locationTileIndex']
+
+        for p_id, lr_data in diff.get('mechanicLongestRoadState', {}).items():
+            longest_road = lr_data.get('longestRoad')
+            if longest_road is not None and int(p_id) in self.players:
+                self.players[int(p_id)].longest_road = longest_road
 
         # null value = offer closed/cancelled; non-null = active offer
         for offer_id, offer in diff.get('tradeState', {}).get('activeOffers', {}).items():

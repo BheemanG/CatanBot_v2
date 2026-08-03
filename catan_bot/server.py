@@ -78,6 +78,7 @@ def handle_state():
             'cities': p.cities,
             'roads': p.roads,
             'vp': p.vp,
+            'longest_road': p.longest_road,
         }
     return jsonify({
         'game_id':      state.id,
