@@ -79,6 +79,7 @@ def handle_state():
             'roads': p.roads,
             'vp': p.vp,
             'longest_road': p.longest_road,
+            'army_size': p.army_size,
         }
     return jsonify({
         'game_id':      state.id,
@@ -87,9 +88,9 @@ def handle_state():
         'turn_state':   state.turn_state,
         'players':      players_out,
         'robber_hex':   state.robber_hex,
-        'vertices':     [v for v in state.vertices],
-        'ports':        state.ports,
         'my_port_ratios': state.port_ratios(),
+        'longest_road_holder': state.longest_road_holder(),
+        'largest_army_holder': state.largest_army_holder(),
     })
 
 @app.route('/outgoing', methods=['POST'])

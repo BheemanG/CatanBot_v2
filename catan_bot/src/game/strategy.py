@@ -35,35 +35,28 @@ def score_hex(h):
 def score_vertex(v_id, state):
     return sum(score_hex(state.hexes[h_id]) for h_id in VERTEX_TO_HEXES[v_id])
 
-def my_produced_resources(state, extra_vertex=None):
-    """Resource ids produced by hexes touching any vertex we currently own, plus
-    extra_vertex if given — lets callers ask 'what would we produce if we also settled
-    here', since a candidate settlement's own hexes count even before it's placed."""
-    vertices = {v for v, owner in enumerate(state.vertices) if owner == state.my_color}
-    if extra_vertex is not None:
-        vertices.add(extra_vertex)
-    produced = set()
-    for v in vertices:
-        for h_id in VERTEX_TO_HEXES[v]:
-            h = state.hexes[h_id]
-            if h and h.resource and h.resource != 0:
-                produced.add(h.resource)
-    return produced
-
 def port_value(v_id, state, weights=None):
     """Strategic value of settling on a port vertex. A generic 3:1 port is always somewhat
     useful. A specific 2:1 port is only worth anything if we actually produce (or would
     produce, by settling at v_id) that resource somewhere in our network — a wheat port is
-    dead weight if nothing we own makes wheat, no matter how well wheat fits our archetype."""
+    dead weight if nothing we own makes wheat, no matter how well wheat fits our archetype.
+    Scaled by how many pips of that resource we produce: a 2:1 port feeding a small trickle
+    is only marginally better than dead weight, but one feeding a big production engine (e.g.
+    several lumber hexes) is worth heavily prioritizing over a similar-distance non-port spot."""
     port = state.ports.get(v_id)
     if not port:
         return 0
     if port['resource'] is None:
         return 1.5
-    if port['resource'] not in my_produced_resources(state, extra_vertex=v_id):
+    pips = board_income(state).get(port['resource'], 0)
+    for h_id in VERTEX_TO_HEXES[v_id]:
+        h = state.hexes[h_id]
+        if h and h.resource == port['resource']:
+            pips += DICE_VALUE.get(h.dice, 0)
+    if pips == 0:
         return 0.5
     w = weights.get(port['resource'], 1.0) if weights else 1.0
-    return 2.5 * w
+    return (2.0 + 0.3 * pips) * w
 
 def score_vertex_buildable(v_id, state):
     """score_vertex plus port bonus — used when choosing WHERE to place a new settlement
@@ -151,19 +144,26 @@ def best_road(road_spots, state):
         return max(score_vertex_buildable(v, state) / (1 + dist) for v, dist in reachable.items())
     return max(road_spots, key=road_score)
 
-# Ore-Wheat-Sheep: favours ore/grain heavily (city + dev card engine), sheep moderately.
-OWS_WEIGHTS = {5: 1.5, 4: 1.4, 3: 1.1, 1: 0.7, 2: 0.7}
-# Lumber-Brick: favours lumber/brick heavily (cheap settlements + roads to rush expansion).
-LB_WEIGHTS  = {1: 1.5, 2: 1.5, 3: 1.0, 4: 0.8, 5: 0.6}
+# Ore-Wheat-Sheep: favours ore/grain, sheep moderately — halved deviation from neutral (1.0)
+# vs. the original weights so raw pips and resource diversity drive vertex scoring first,
+# with archetype fit acting as a lighter tie-breaking nudge rather than the dominant term.
+OWS_WEIGHTS = {5: 1.25, 4: 1.2, 3: 1.05, 1: 0.85, 2: 0.85}
+# Lumber-Brick: favours lumber/brick — same halved-deviation treatment as OWS_WEIGHTS.
+LB_WEIGHTS  = {1: 1.25, 2: 1.25, 3: 1.0, 4: 0.9, 5: 0.8}
 ARCHETYPE_WEIGHTS = {'ows': OWS_WEIGHTS, 'lb': LB_WEIGHTS}
+
+DIVERSITY_WEIGHT = 1.5  # bonus per distinct resource type touched by a single vertex
 
 def score_vertex_weighted(v_id, state, weights):
     score = 0
+    resources = set()
     for h_id in VERTEX_TO_HEXES[v_id]:
         h = state.hexes[h_id]
         if not h or not h.resource or h.resource == 0:
             continue
         score += DICE_VALUE.get(h.dice, 0) * weights.get(h.resource, 1.0)
+        resources.add(h.resource)
+    score += len(resources) * DIVERSITY_WEIGHT
     score += port_value(v_id, state, weights)
     return score
 
@@ -361,8 +361,17 @@ def best_build_completing_trade(state, give_pool, ratios, settlement_spots, city
 
     if not candidates:
         return None
-    # prefer trading away whichever resource leaves the biggest post-trade surplus
-    return max(candidates, key=lambda gw: res.get(gw[0], 0) - ratios[gw[0]])
+    # prefer trading away whichever resource leaves the biggest post-trade surplus, discounted
+    # by how badly we still need that resource ourselves (resource_need_score) — a big pile of
+    # something we barely produce (e.g. from a steal or Monopoly) is riskier to give up than an
+    # equal-sized pile of something our board generates plenty of, since we can't easily refill it
+    income = board_income(state)
+    def give_score(gw):
+        give, _ = gw
+        surplus = res.get(give, 0) - ratios[give]
+        caution = 1 / (1 + resource_need_score(give, income, state))
+        return surplus * caution
+    return max(candidates, key=give_score)
 
 def try_bank_trade(state):
     player = state.my_player()
@@ -413,8 +422,16 @@ def try_bank_trade(state):
 
         want = max(want_candidates, key=lambda r: resource_need_score(r, income, state))
         # prefer the resource with the most trades' worth of surplus once its port ratio is
-        # accounted for — a modest stack behind a 2:1 port can outrank a bigger 4:1 stack
-        give = max(give_pool, key=lambda r: (res.get(r, 0) // ratios[r], res.get(r, 0)))
+        # accounted for — a modest stack behind a 2:1 port can outrank a bigger 4:1 stack —
+        # but discount that by resource_need_score so a resource we barely produce isn't
+        # traded away just because we're currently sitting on a pile of it
+        give = max(
+            give_pool,
+            key=lambda r: (
+                (res.get(r, 0) // ratios[r]) / (1 + resource_need_score(r, income, state)),
+                res.get(r, 0),
+            ),
+        )
 
     if give == want:
         return None
@@ -426,6 +443,57 @@ def try_bank_trade(state):
             "isBankTrade": True,
             "counterOfferInResponseToTradeId": None,
             "offeredResources": [give] * ratios[give],
+            "wantedResources": [want],
+        },
+        "sequence": state.next_sequence(),
+    }
+
+def try_player_trade(state):
+    """Propose a 1-for-1 trade to the table (action 49, isBankTrade=False) as a fallback
+    when try_bank_trade found nothing. Only proposes (give, want) pairs where some opponent
+    holds more than 1 of `want` (so they can actually spare one) and none of `give` (so it's
+    something they'd want), we hold multiple of `give` (so parting with one still leaves us
+    some), and `want` scores as genuinely valuable to us via resource_need_score (low income,
+    low count) — not just a resource we happen to be short on right now."""
+    player = state.my_player()
+    res = player.resources
+
+    give_pool = [r for r in range(1, 6) if res.get(r, 0) >= 2]
+    if not give_pool:
+        return None
+
+    candidates = []
+    for color, opp in state.players.items():
+        if color == 0 or color == state.my_color:
+            continue
+        for want in range(1, 6):
+            if opp.resources.get(want, 0) <= 1:
+                continue
+            for give in give_pool:
+                if give == want:
+                    continue
+                if opp.resources.get(give, 0) != 0:
+                    continue
+                candidates.append((give, want))
+
+    if not candidates:
+        return None
+
+    income = board_income(state)
+    # prefer the pair where `want` is most valuable to us, discounted by how much we'd
+    # still need `give` ourselves (don't hand over something we're also short on)
+    def pair_score(gw):
+        give, want = gw
+        return resource_need_score(want, income, state) / (1 + resource_need_score(give, income, state))
+    give, want = max(candidates, key=pair_score)
+
+    return {
+        "action": Action.SEND_TRADE,
+        "payload": {
+            "creator": state.my_color,
+            "isBankTrade": False,
+            "counterOfferInResponseToTradeId": None,
+            "offeredResources": [give],
             "wantedResources": [want],
         },
         "sequence": state.next_sequence(),
@@ -461,6 +529,10 @@ def decide_turn(state):
     if trade:
         return trade
 
+    trade = try_player_trade(state)
+    if trade:
+        return trade
+
     if not state.dev_card_played and 13 in state.turn_start_dev_cards:
         state.dev_card_played = True
         return {"action": Action.CONFIRM_DEV_CARD, "payload": 13, "sequence": state.next_sequence()}
@@ -473,12 +545,37 @@ def decide_turn(state):
 def decide(msg_type, msg_payload, state):
     if msg_type == MsgType.INITIALIZE_MAP:
         state.parse_board(msg_payload)
-        return
+
+        # parse_board already set current_turn/turn_state from currentState, so we can
+        # act on them immediately instead of waiting for the next type 91 diff (e.g. a
+        # mid-game reconnect that re-sends the full board on our own roll/build turn)
+        if state.turn_state == 1 and state.current_turn == state.my_color:
+            state.needs_roll = True
+            player = state.my_player()
+            state.turn_start_dev_cards = list(player.dev_cards)
+            if not state.dev_card_played and 11 in state.turn_start_dev_cards:
+                state.dev_card_played = True
+                time.sleep(1.0)
+                return {"action": Action.CONFIRM_DEV_CARD, "payload": 11, "sequence": state.next_sequence()}
+            state.needs_roll = False
+            time.sleep(1.5)
+            return {"action": Action.ROLL_DICE, "payload": True, "sequence": state.next_sequence()}
+
+        if state.current_turn == state.my_color and state.turn_state == 2:
+            time.sleep(1.0)
+            return decide_turn(state)
+
+        return None
     elif msg_type == MsgType.RESOURCE_DISTRIBUTION:
         for p in msg_payload:
             state.players[p.get('owner')].gain_resources([p.get('card')])
 
     elif msg_type == MsgType.AVAILABLE_SETTLEMENT_PLACEMENTS and state.my_player().vp <= 1 and msg_payload:
+        # type 4/91 don't reliably carry currentTurnPlayerColor during the setup phase,
+        # so state.current_turn can still be None here — receiving this prompt at all is
+        # proof it's our turn, and leaving it unset breaks the roll-detection fallback in
+        # the type 91 handler once normal turns begin (see GAME_STATE_UPDATE branch above)
+        state.current_turn = state.my_color
         time.sleep(1.5)
         return {
             "action": Action.PLACE_INITIAL_SETTLEMENT,
@@ -486,19 +583,16 @@ def decide(msg_type, msg_payload, state):
             "sequence": state.next_sequence()
         }
     elif msg_type == MsgType.AVAILABLE_ROAD_PLACEMENTS and msg_payload and state.road_building_pending > 0:
-        # Road Building dev card: two free roads. First road's action code is
-        # unverified per notes.md (guessed as regular Build Road); second is
-        # confirmed as action 21.
-        is_first = state.road_building_pending == 2
+        # Road Building dev card: both free roads use action 21, confirmed via live testing
         state.road_building_pending -= 1
-        action_code = Action.BUILD_ROAD if is_first else Action.ROAD_BUILDING_SECOND_ROAD
         time.sleep(1.0)
         return {
-            "action": action_code,
+            "action": Action.ROAD_BUILDING_SECOND_ROAD,
             "payload": best_road(msg_payload, state),
             "sequence": state.next_sequence()
         }
     elif msg_type == MsgType.AVAILABLE_ROAD_PLACEMENTS and msg_payload:
+        state.current_turn = state.my_color  # see comment in AVAILABLE_SETTLEMENT_PLACEMENTS above
         time.sleep(1.5)
         return {
             "action": Action.PLACE_INITIAL_ROAD,
@@ -612,6 +706,12 @@ def decide(msg_type, msg_payload, state):
         current_diff = diff.get('currentState', {})
         state.update(diff)
 
+        # state not fully initialized yet (e.g. server restarted mid-game and this diff
+        # arrived before a fresh type 4) — nothing below can be decided without knowing
+        # our own color/hand, and several checks assume state.my_player() is not None
+        if state.my_color is None:
+            return None
+
         # robber was moved: if no opponents are adjacent to new hex, steal sequence is done
         if 'mechanicRobberState' in diff and state.robber_pending:
             hex_verts = HEX_TO_VERTICES.get(state.robber_hex, [])
@@ -642,12 +742,25 @@ def decide(msg_type, msg_payload, state):
             time.sleep(1.5)
             return {"action": Action.ROLL_DICE, "payload": True, "sequence": state.next_sequence()}
 
+        # finalize our own trade offers as soon as some opponent accepts (response=1)
+        for offer_id, offer in state.active_offers.items():
+            if offer.get('creator') != state.my_color or offer_id in state.finalized_offers:
+                continue
+            accepted_by = [int(c) for c, r in offer.get('playerResponses', {}).items() if r == 1]
+            if accepted_by:
+                state.finalized_offers.add(offer_id)
+                return {
+                    "action": Action.FINALIZE_TRADE,
+                    "payload": {"tradeId": offer_id, "playerToExecuteTradeWith": accepted_by[0]},
+                    "sequence": state.next_sequence()
+                }
+
         # respond to pending enemy trade offers before taking any turn action
         my_color_str = str(state.my_color)
         for offer_id, offer in state.active_offers.items():
             if (
                 offer.get('creator') != state.my_color
-                and my_color_str not in offer.get('playerResponses', {})
+                and offer.get('playerResponses', {}).get(my_color_str, 0) == 0
                 and offer_id not in state.responded_offers
             ):
                 state.responded_offers.add(offer_id)

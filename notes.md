@@ -53,8 +53,8 @@ Sent on connect / reconnect. Contains the same fields as Type 91 diffs at the to
 | `payload.gameState.mapState.tileCornerStates` | Placed settlements / cities |
 | `payload.gameState.mapState.tileEdgeStates` | Placed roads |
 | `payload.gameState.mapState.portEdgeStates` | Port locations + trade ratios (see below) |
-| `payload.currentState` | `turnState`, `currentTurnPlayerColor` |
-| `payload.tradeState.activeOffers` | Active trade offers |
+| `payload.gameState.currentState` | `turnState`, `currentTurnPlayerColor` |
+| `payload.gameState.tradeState.activeOffers` | Active trade offers |
 
 #### `portEdgeStates`
 Only present in Type 4 (ports never change mid-game, so Type 91 diffs never touch this).
@@ -376,11 +376,11 @@ All messages carry an incrementing `out_sequence`.
 3. Type 29 may arrive → bot steals from richest player (action 5)
 4. Next type 91 → bot rolls dice
 
-**Road Building (payload `14`)** — play after rolling during turn: ⚠️
+**Road Building (payload `14`)** — play after rolling during turn:
 1. Send action 48 `payload: 14`
-2. Type 31 arrives → place first road (action ?)
+2. Type 31 arrives → place first road (action 21)
 3. Type 31 arrives again → place second road (action 21)
-> ⚠️ Action code for first road in road-building card unverified. Needs live testing.
+Both free roads use action 21, confirmed via live testing.
 
 **VP Card (payload `12`)** — no action needed:
 VP cards are counted automatically in `victoryPointsState`. No action 48 required.

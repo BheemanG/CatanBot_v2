@@ -19,6 +19,30 @@
 
     let capturedHeader = null;
 
+    function postWithRetry(url, data, onload, attempt = 1, maxAttempts = 5, delayMs = 500) {
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: url,
+            headers: { 'Content-Type': 'application/json' },
+            data: data,
+            timeout: 3000,
+            onload: onload,
+            onerror: function(e) { retryOrGiveUp(e); },
+            ontimeout: function(e) { retryOrGiveUp(e); }
+        });
+
+        function retryOrGiveUp(e) {
+            if (attempt < maxAttempts) {
+                console.log(`[CATAN] Python server not reachable (attempt ${attempt}/${maxAttempts}), retrying in ${delayMs}ms`, e);
+                setTimeout(() => {
+                    postWithRetry(url, data, onload, attempt + 1, maxAttempts, delayMs * 2);
+                }, delayMs);
+            } else {
+                console.log('[CATAN] Python server not reachable, giving up after', maxAttempts, 'attempts', e);
+            }
+        }
+    }
+
     const OriginalWebSocket = unsafeWindow.WebSocket;
 
     function PatchedWebSocket(url, protocols) {
@@ -54,24 +78,12 @@
 
                 if (!isInGame()) return;
 
-                // temporarily filter type 91
-                if (decoded?.data?.type !== 91) return;
-
                 console.log('[WS IN]', JSON.stringify(decoded, null, 2));
 
-                GM_xmlhttpRequest({
-                    method: 'POST',
-                    url: 'http://localhost:5000/incoming',
-                    headers: { 'Content-Type': 'application/json' },
-                    data: JSON.stringify(decoded),
-                    onload: function(response) {
-                        const result = JSON.parse(response.responseText);
-                        if (result.action !== null && result.action !== undefined) {
-                            unsafeWindow.catanSend(result.action, result.payload, result.sequence);
-                        }
-                    },
-                    onerror: function(e) {
-                        console.log('[CATAN] Python server not reachable', e);
+                postWithRetry('http://localhost:5000/incoming', JSON.stringify(decoded), function(response) {
+                    const result = JSON.parse(response.responseText);
+                    if (result.action !== null && result.action !== undefined) {
+                        unsafeWindow.catanSend(result.action, result.payload, result.sequence);
                     }
                 });
 
@@ -98,13 +110,7 @@
 
                     if (!isInGame()) return originalSend(data);
 
-                    GM_xmlhttpRequest({
-                        method: 'POST',
-                        url: 'http://localhost:5000/outgoing',
-                        headers: { 'Content-Type': 'application/json' },
-                        data: JSON.stringify(payload),
-                        onerror: function(e) {}
-                    });
+                    postWithRetry('http://localhost:5000/outgoing', JSON.stringify(payload), function(response) {});
                 } catch(e) {
                     console.log('[WS OUT BYTES]', Array.from(bytes));
                 }

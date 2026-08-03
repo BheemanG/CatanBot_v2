@@ -16,6 +16,7 @@ class Player:
         self.vp = 0
         self.dev_cards = [] #dev card ids
         self.longest_road = 0
+        self.army_size = 0 # knights played, from mechanicDevelopmentCardsState.developmentCardsUsed
 
     def gain_resources(self, cards):
         for c in cards:
@@ -53,6 +54,7 @@ class GameState:
         self.ports            = {}    # vertex_id -> {"resource": rsc_id or None, "ratio": 2 or 3}
         self.active_offers    = {}    # trade_id -> offer dict
         self.responded_offers = set() # offer IDs we've already sent action 50 for
+        self.finalized_offers = set() # offer IDs (created by us) we've already sent action 51 for
         self.needs_roll       = False # True after turnState=1 transition; cleared on roll
         self.dev_card_played  = False # True after playing a dev card this turn
         self.robber_pending   = False # True after type 33 handled; cleared after steal or if no opponents adjacent
@@ -69,6 +71,23 @@ class GameState:
 
     def my_player(self):
         return self.players.get(self.my_color)
+
+    def _title_holder(self, attr, minimum):
+        """Color of the player currently holding a count-based bonus (Longest Road /
+        Largest Army) — None if no one has met the minimum, or if tied for the max."""
+        counts = {color: getattr(p, attr) for color, p in self.players.items() if color != 0}
+        if not counts:
+            return None
+        best = max(counts.values())
+        if best < minimum or sum(1 for v in counts.values() if v == best) > 1:
+            return None
+        return max(counts, key=lambda c: counts[c])
+
+    def longest_road_holder(self):
+        return self._title_holder('longest_road', 5)
+
+    def largest_army_holder(self):
+        return self._title_holder('army_size', 3)
 
     def port_ratios(self):
         """Best trade ratio per resource (1-5) reachable from our settlements/cities.
@@ -105,13 +124,13 @@ class GameState:
         self.ports             = {}
         self.active_offers    = {}
         self.responded_offers = set()
+        self.finalized_offers = set()
         self.needs_roll       = False
         self.dev_card_played  = False
         self.robber_pending   = False
         self.road_building_pending = 0
         self.turn_start_dev_cards = []
         self.build_archetype  = None
-        self.out_sequence     = 1
 
         self.players = {0: self._make_bank()}
         for p in msg_payload.get('playerUserStates'):
@@ -156,14 +175,25 @@ class GameState:
             self.edges[e_id] = owner
             self.players[owner].place_road(e_id)
 
-        current = msg_payload.get('currentState', {})
+        current = msg_payload.get('gameState', {}).get('currentState', {})
         if 'currentTurnPlayerColor' in current:
             self.current_turn = current['currentTurnPlayerColor']
         if 'turnState' in current:
             self.turn_state = current['turnState']
 
-        for offer_id, offer in msg_payload.get('tradeState', {}).get('activeOffers', {}).items():
+        for offer_id, offer in msg_payload.get('gameState', {}).get('tradeState', {}).get('activeOffers', {}).items():
             self.active_offers[offer_id] = offer
+
+        game_state = msg_payload.get('gameState', {})
+        for p_id, lr_data in game_state.get('mechanicLongestRoadState', {}).items():
+            longest_road = lr_data.get('longestRoad')
+            if longest_road is not None and int(p_id) in self.players:
+                self.players[int(p_id)].longest_road = longest_road
+
+        for p_id, p_dev in game_state.get('mechanicDevelopmentCardsState', {}).get('players', {}).items():
+            used = p_dev.get('developmentCardsUsed')
+            if used is not None and int(p_id) in self.players:
+                self.players[int(p_id)].army_size = used.count(11)
 
         print('[STATE] Board Initialized')
 
@@ -207,6 +237,13 @@ class GameState:
         if dev_cards is not None:
             self.my_player().dev_cards = list(dev_cards)
 
+        # developmentCardsUsed (unlike the hand itself) is public for every player —
+        # use it to track each player's knight count for the Largest Army bonus
+        for p_id, p_dev in dev_state.get('players', {}).items():
+            used = p_dev.get('developmentCardsUsed')
+            if used is not None and int(p_id) in self.players:
+                self.players[int(p_id)].army_size = used.count(11)
+
         robber = diff.get('mechanicRobberState', {})
         if 'locationTileIndex' in robber:
             self.robber_hex = robber['locationTileIndex']
@@ -216,13 +253,23 @@ class GameState:
             if longest_road is not None and int(p_id) in self.players:
                 self.players[int(p_id)].longest_road = longest_road
 
-        # null value = offer closed/cancelled; non-null = active offer
+        # null value = offer closed/cancelled; non-null = a (possibly partial) update —
+        # later diffs often carry only a single player's playerResponses entry, so this
+        # must merge into the stored offer rather than replace it wholesale, or a lone
+        # response update would wipe out creator/offeredResources/wantedResources and
+        # every other player's previously recorded response
         for offer_id, offer in diff.get('tradeState', {}).get('activeOffers', {}).items():
             if offer is None:
                 self.active_offers.pop(offer_id, None)
                 self.responded_offers.discard(offer_id)
+                self.finalized_offers.discard(offer_id)
             else:
-                self.active_offers[offer_id] = offer
+                existing = self.active_offers.setdefault(offer_id, {})
+                for key, value in offer.items():
+                    if key in ('playerResponses', 'playersCreatingCounterOffer') and isinstance(value, dict):
+                        existing.setdefault(key, {}).update(value)
+                    else:
+                        existing[key] = value
 
         current = diff.get('currentState', {})
         if 'currentTurnPlayerColor' in current:

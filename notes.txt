@@ -19,6 +19,7 @@ All messages include an incrementing in_sequence.
 TYPE 1 — Game Settings
 --------------------------------------------------------------------------------
   Lists match settings. See type1.json.
+  also at beginning of match: type 69, type 48, type5
 
 --------------------------------------------------------------------------------
 TYPE 4 — Full Game State Snapshot (source of truth)
@@ -30,8 +31,8 @@ TYPE 4 — Full Game State Snapshot (source of truth)
   payload.gameState.mapState.tileCornerStates   placed settlements/cities
   payload.gameState.mapState.tileEdgeStates     placed roads
   payload.gameState.mapState.portEdgeStates     port locations + trade ratios
-  payload.currentState                          turnState, currentTurnPlayerColor
-  payload.tradeState.activeOffers               active trade offers
+  payload.gameState.currentState                turnState, currentTurnPlayerColor
+  payload.gameState.tradeState.activeOffers     active trade offers
 
   portEdgeStates — only present in type 4 (ports never change mid-game):
     { "0": { "x": 0, "y": -2, "z": 0, "type": 6 }, "1": {...}, ... }
