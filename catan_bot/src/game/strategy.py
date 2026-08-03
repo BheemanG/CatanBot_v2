@@ -26,6 +26,13 @@ SETTLEMENT_COST = {1: 1, 2: 1, 3: 1, 4: 1}
 CITY_COST       = {4: 2, 5: 3}
 DEV_CARD_COST   = {3: 1, 4: 1, 5: 1}
 
+MAX_SETTLEMENTS = 5  # physical piece limit — must upgrade one to a city to free a piece
+MAX_CITIES      = 4  # physical piece limit
+
+EARLY_GAME_VP = 4  # below this, prioritize expanding (roads/settlements) over trading or dev cards
+
+SURPLUS_DUMP_THRESHOLD = 6  # at/above this count, trade the resource away regardless of other give-side protections
+
 def score_hex(h):
     value = DICE_VALUE.get(h.dice, 0)
     if h.resource == RSC_IDS['wool']:
@@ -73,6 +80,8 @@ def is_open_vertex(v_id, state):
     return state.vertices[v_id] is None and not any(state.vertices[n] is not None for n in neighbors(v_id))
 
 def valid_settlement_spots(state):
+    if len(state.my_player().settlements) >= MAX_SETTLEMENTS:
+        return []  # no settlement pieces left — must upgrade one to a city first
     my_edges = {e for e, owner in enumerate(state.edges) if owner == state.my_color}
     spots = []
     for v in range(54):
@@ -83,6 +92,8 @@ def valid_settlement_spots(state):
     return spots
 
 def valid_city_spots(state):
+    if len(state.my_player().cities) >= MAX_CITIES:
+        return []  # no city pieces left
     return list(state.my_player().settlements)
 
 def valid_road_spots(state):
@@ -377,8 +388,22 @@ def try_bank_trade(state):
     player = state.my_player()
     res = player.resources
     ratios = state.port_ratios()
+    income = board_income(state)
 
-    give_pool = [r for r in range(1, 6) if res.get(r, 0) >= ratios[r]]
+    tradeable = [r for r in range(1, 6) if res.get(r, 0) >= ratios[r]]
+
+    # never give away a resource we don't produce on the board at all — we'd have no way
+    # to replenish it — and below EARLY_GAME_VP, also protect lumber/brick specifically
+    # since we still need them to build roads/settlements rather than trade them away
+    protected_pool = [r for r in tradeable if income.get(r, 0) > 0]
+    if player.vp < EARLY_GAME_VP:
+        protected_pool = [r for r in protected_pool if r not in (1, 2)]
+
+    # ...but at SURPLUS_DUMP_THRESHOLD+ those protections stop mattering — a pile that
+    # large is worth shedding for something useful even if we can't easily replenish it
+    overflow_pool = [r for r in tradeable if res.get(r, 0) >= SURPLUS_DUMP_THRESHOLD]
+
+    give_pool = sorted(set(protected_pool) | set(overflow_pool))
     if not give_pool:
         return None
 
@@ -390,8 +415,8 @@ def try_bank_trade(state):
     if build_trade:
         give, want = build_trade
     else:
-        # proactive: any resource at 5+ risks a discard on a 7 — trade it down now
-        has_surplus = any(res.get(r, 0) >= 5 for r in give_pool)
+        # proactive: any resource at SURPLUS_DUMP_THRESHOLD+ risks a discard on a 7 — trade it down now
+        has_surplus = any(res.get(r, 0) >= SURPLUS_DUMP_THRESHOLD for r in give_pool)
 
         if not has_surplus:
             # targeted: only trade if one trade closes a single-resource deficit for a build
@@ -402,7 +427,8 @@ def try_bank_trade(state):
                 goals.append(CITY_COST)
             if not settlement_spots and road_spots:
                 goals.append(ROAD_COST)
-            goals.append(DEV_CARD_COST)
+            if player.vp >= EARLY_GAME_VP:
+                goals.append(DEV_CARD_COST)
 
             can_unlock = any(
                 res.get(needed, 0) < amt
@@ -415,7 +441,6 @@ def try_bank_trade(state):
                 return None
 
         # want: highest-need resource we don't already have 4+ of
-        income = board_income(state)
         want_candidates = [r for r in range(1, 6) if r not in give_pool]
         if not want_candidates:
             want_candidates = sorted(range(1, 6), key=lambda r: res.get(r, 0))
@@ -457,8 +482,13 @@ def try_player_trade(state):
     low count) — not just a resource we happen to be short on right now."""
     player = state.my_player()
     res = player.resources
+    income = board_income(state)
 
-    give_pool = [r for r in range(1, 6) if res.get(r, 0) >= 2]
+    # never give away a resource we don't produce on the board at all, and below
+    # EARLY_GAME_VP also protect lumber/brick specifically for road/settlement building
+    give_pool = [r for r in range(1, 6) if res.get(r, 0) >= 2 and income.get(r, 0) > 0]
+    if player.vp < EARLY_GAME_VP:
+        give_pool = [r for r in give_pool if r not in (1, 2)]
     if not give_pool:
         return None
 
@@ -479,7 +509,6 @@ def try_player_trade(state):
     if not candidates:
         return None
 
-    income = board_income(state)
     # prefer the pair where `want` is most valuable to us, discounted by how much we'd
     # still need `give` ourselves (don't hand over something we're also short on)
     def pair_score(gw):
@@ -522,6 +551,12 @@ def decide_turn(state):
         state.road_building_pending = 2
         return {"action": Action.CONFIRM_DEV_CARD, "payload": 14, "sequence": state.next_sequence()}
 
+    # below EARLY_GAME_VP, push to expand the road network toward future settlement spots
+    # even when settlement_spots isn't empty (we just can't afford one yet) — better than
+    # trading resources away this early
+    if player.vp < EARLY_GAME_VP and road_spots and can_afford(player, ROAD_COST):
+        return {"action": Action.BUILD_ROAD, "payload": best_road(road_spots, state), "sequence": state.next_sequence()}
+
     if not settlement_spots and road_spots and can_afford(player, ROAD_COST):
         return {"action": Action.BUILD_ROAD, "payload": best_road(road_spots, state), "sequence": state.next_sequence()}
 
@@ -537,7 +572,9 @@ def decide_turn(state):
         state.dev_card_played = True
         return {"action": Action.CONFIRM_DEV_CARD, "payload": 13, "sequence": state.next_sequence()}
 
-    if can_afford(player, DEV_CARD_COST):
+    # below EARLY_GAME_VP, don't spend scarce wool/grain/ore on a dev card — hold it for
+    # the next road/settlement instead
+    if player.vp >= EARLY_GAME_VP and can_afford(player, DEV_CARD_COST):
         return {"action": Action.BUY_DEV_CARD, "payload": True, "sequence": state.next_sequence()}
 
     return {"action": Action.END_TURN, "payload": True, "sequence": state.next_sequence()}
